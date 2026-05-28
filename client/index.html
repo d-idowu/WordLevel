@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sequence — WordLevel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="upload-page">
+
+  <header class="topbar">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <rect width="22" height="22" rx="6" fill="#534AB7"/>
+        <path d="M6 11h10M6 7.5h6M6 14.5h8" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      Sequence
+    </div>
+    <span class="badge-beta">WordLevel</span>
+  </header>
+
+  <main class="upload-main">
+    <div class="upload-hero">
+      <h1>Drop in your video.<br>We'll clean it up.</h1>
+      <p class="subtitle"> We find all the filler words, silent moments, andclutter.<br>You decide what stays.</p>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-inner">
+        <div class="drop-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+            <rect width="40" height="40" rx="12" fill="#EEEDFE"/>
+            <path d="M20 12v16M13 19l7-7 7 7" stroke="#534AB7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="drop-label">Drag &amp; drop your video here</p>
+        <p class="drop-sub">or</p>
+        <label class="btn-upload">
+          Browse files
+          <input type="file" id="fileInput" accept="video/*" hidden>
+        </label>
+        <p class="drop-formats">MP4 · MOV · WebM · MKV · up to 4GB</p>
+      </div>
+    </div>
+
+    <!-- Progress state (hidden initially) -->
+    <div class="upload-progress" id="uploadProgress" style="display:none">
+      <div class="progress-card">
+        <div class="progress-filename" id="progressFilename">video.mp4</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar" style="width:0%"></div>
+        </div>
+        <div class="progress-status" id="progressStatus">Uploading...</div>
+      </div>
+    </div>
+
+    <!-- Feature pills -->
+    <div class="feature-pills">
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l1.5 4H13l-3.5 2.5 1.5 4L7 9l-4 2.5 1.5-4L1 5h4.5z" fill="#534AB7"/></svg> Filler word detection</span>
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M7 2v10" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg> Silence removal</span>
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L7 3l4 8" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg> Audio normalization</span>
+      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" stroke="#534AB7" stroke-width="1.5" fill="none"/><path d="M5.5 5.5L8.5 8.5M8.5 5.5L5.5 8.5" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round"/></svg> Bleep / censor</span>
+    </div>
+  </main>
+
+  <script>
+    const API = 'http://localhost:8000';
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const uploadProgress = document.getElementById('uploadProgress');
+
+    // Drag and drop
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) handleFile(fileInput.files[0]);
+    });
+
+    async function handleFile(file) {
+      document.getElementById('progressFilename').textContent = file.name;
+      dropZone.style.display = 'none';
+      uploadProgress.style.display = 'flex';
+      setStatus('Uploading...');
+      setProgress(10);
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      let jobId;
+      try {
+        const res = await fetch(`${API}/upload`, { method: 'POST', body: formData });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        jobId = data.job_id;
+      } catch (err) {
+        setStatus(`Upload failed: ${err.message}`);
+        return;
+      }
+
+      setProgress(30);
+      setStatus('Transcribing with AI...');
+
+      // Poll status
+      await pollUntilReady(jobId);
+    }
+
+    async function pollUntilReady(jobId) {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API}/status/${jobId}`);
+          const data = await res.json();
+
+          if (data.status === 'transcribing') {
+            setProgress(50 + Math.random() * 20);
+            setStatus('Transcribing with AI...');
+          } else if (data.status === 'ready') {
+            clearInterval(interval);
+            setProgress(100);
+            setStatus('Done! Loading editor...');
+            setTimeout(() => {
+              window.location.href = `editor.html?job=${jobId}`;
+            }, 600);
+          } else if (data.status === 'error') {
+            clearInterval(interval);
+            setStatus(`Error: ${data.error}`);
+          }
+        } catch (e) {
+          // keep polling
+        }
+      }, 1500);
+    }
+
+    function setProgress(pct) {
+      document.getElementById('progressBar').style.width = Math.min(pct, 100) + '%';
+    }
+    function setStatus(msg) {
+      document.getElementById('progressStatus').textContent = msg;
+    }
+  </script>
+</body>
+</html>
