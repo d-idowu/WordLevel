@@ -576,3 +576,162 @@ body {
 
 .no-results { color: var(--text-3); font-size: 14px; padding: 24px 0; }
 .error-msg { color: var(--red); font-size: 14px; padding: 24px 0; }
+
+/* ── MUTE WORD (added) ───────────────────────────────────────────────────── */
+.word.mute { background: #F1EFE8; color: #444441; border-color: #B4B2A9; font-style: italic; }
+.stat.mute { background: #F1EFE8; color: #444441; border: 0.5px solid #B4B2A9; }
+
+/* ── EDITOR BODY (wraps layout + timeline) ───────────────────────────────── */
+.editor-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;   /* allow shrink when timeline takes space */
+}
+
+/* ── TIMELINE PANEL ──────────────────────────────────────────────────────── */
+.timeline-panel {
+  height: 130px;
+  flex-shrink: 0;
+  border-top: 0.5px solid var(--border);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.tl-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 4px;
+  flex-shrink: 0;
+}
+
+.tl-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--border-md);
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tl-btn:hover { background: var(--purple-lt); color: var(--purple); border-color: var(--purple-mid); }
+
+.tl-timecode {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 90px;
+}
+.tl-sep { color: var(--text-3); }
+
+.tl-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-left: 4px;
+}
+
+.tl-waveform-wrap {
+  flex: 1;
+  min-height: 0;
+  padding: 0 14px;
+  position: relative;
+  overflow: hidden;
+}
+
+#waveform {
+  width: 100%;
+  height: 72px;
+}
+
+/* Region labels drawn inside WaveSurfer regions */
+.tl-region-label {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 9px;
+  font-family: var(--mono);
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  max-width: calc(100% - 4px);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: block;
+  line-height: 1;
+  padding-top: 2px;
+}
+
+.tl-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 14px 6px;
+  flex-shrink: 0;
+}
+.tl-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.tl-legend-item::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--c);
+  display: inline-block;
+}
+
+/* ── SPEED CONTROLS ──────────────────────────────────────────────────────── */
+.tl-speed-group {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+.tl-speed-btn {
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--mono);
+  font-weight: 500;
+  border: 0.5px solid var(--border-md);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.tl-speed-btn:hover { background: var(--purple-lt); color: var(--purple); }
+.tl-speed-btn.active { background: var(--purple); color: white; border-color: var(--purple); }
+
+/* ── FREE CUT WORD TINT ───────────────────────────────────────────────────── */
+/* Faded red box — word text stays fully black and readable */
+.word.in-free-cut {
+  background: rgba(220, 50, 50, 0.10);
+  border-color: rgba(220, 50, 50, 0.30);
+  color: var(--text);   /* keep text black, no dimming */
+}
+/* Tagged words keep their own color but gain a red border hint */
+.word.cut.in-free-cut    { border-color: rgba(220, 50, 50, 0.4); }
+.word.filler.in-free-cut { border-color: rgba(220, 50, 50, 0.4); }
+.word.bleep.in-free-cut  { border-color: rgba(220, 50, 50, 0.4); }
+.word.mute.in-free-cut   { border-color: rgba(220, 50, 50, 0.4); }

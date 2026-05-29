@@ -16,7 +16,7 @@ def render_edit(
 ) -> None:
     duration = get_duration(input_path)
 
-    cuts   = [op for op in operations if op["type"] in ("cut_silence", "cut_filler", "cut_manual")]
+    cuts   = [op for op in operations if op["type"] in ("cut_silence", "cut_filler", "cut_manual", "free_cut")]
     bleeps = [op for op in operations if op["type"] == "bleep"]
     mutes  = [op for op in operations if op["type"] == "mute"]
 

@@ -158,6 +158,42 @@ async def download_video(job_id: str):
     )
 
 
+@app.get("/video/{job_id}")
+async def stream_video(job_id: str):
+    """Stream the original uploaded video for the preview player."""
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    video_path = jobs[job_id]["video_path"]
+    if not Path(video_path).exists():
+        raise HTTPException(404, "Video file not found")
+    return FileResponse(video_path, media_type="video/mp4")
+
+
+@app.get("/audio/{job_id}")
+async def stream_audio(job_id: str):
+    """
+    Return a lightweight MP3 of the original audio for WaveSurfer.
+    Extracted on first request, cached as uploads/{job_id}_preview.mp3
+    """
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    video_path = jobs[job_id]["video_path"]
+    audio_path = UPLOAD_DIR / f"{job_id}_preview.mp3"
+
+    if not audio_path.exists():
+        import subprocess
+        result = subprocess.run([
+            "ffmpeg", "-y", "-i", video_path,
+            "-vn", "-ac", "1", "-ar", "22050",
+            "-b:a", "64k",          # small file — just for waveform display
+            str(audio_path)
+        ], capture_output=True)
+        if result.returncode != 0:
+            raise HTTPException(500, "Audio extraction failed")
+
+    return FileResponse(str(audio_path), media_type="audio/mpeg")
+
+
 # ── BACKGROUND TASKS ─────────────────────────────────────────────────────────
 
 async def run_transcription(job_id: str, video_path: Path):

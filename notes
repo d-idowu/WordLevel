@@ -1,5 +1,10 @@
-Double Check and amke syuure scensoring works
 Add preview and editing word duraiton or silence duration
 add final preview in compiler (use methods taht most video editors use)
 add timeline style this will help shwo cuts easier and adjust teh editing once preview is added
-at the end display noise reduction compressor al0oudness normalize also make sure that the Youtube spotify broadcast arent required and if its attached to loudness normlaize then make sure thyy are greyed out or disapear when the toggle isnt no.
+at the end display noise reduction compressor al0oudness normalize statistics
+also make sure that the Youtube spotify broadcast arent required and if its attached to loudness normlaize then make sure thyy are greyed out or disapear when the toggle isnt no.
+Add threshold for cutting to give space between cuts as an option
+add an option to bleep all of a cetain word
+
+
+another idea contextualize the transcript currently we are working based no words that match but a word that sometimes is a filler word isnt always may we should use AI to detect filler words instead of a set list

@@ -1,45 +1,53 @@
 /**
  * editor.js — Sequence Auto Editor
+ * Manages transcript display, cut list state, and render/export.
  */
 
 const API = 'http://localhost:8000';
 const params = new URLSearchParams(location.search);
 const JOB_ID = params.get('job');
 
-// ── STATE ─────────────────────────────────────────────────────────────────────
+// ── STATE ────────────────────────────────────────────────────────────────────
 
 let state = {
-  words: [],
-  operations: [],
+  words: [],          // raw word list from Deepgram
+  operations: [],     // full EDL from server
   activeFilter: 'all',
   searchQuery: '',
   targetLufs: -14,
-  ctxWord: null,
-  history: [],
+  ctxWord: null,      // currently right-clicked word element
+  history: [],        // undo stack (array of ops snapshots)
 };
 
 
-// ── INIT ──────────────────────────────────────────────────────────────────────
+// ── INIT ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-  if (!JOB_ID) { showError('No job ID. Go back and upload a video.'); return; }
+  if (!JOB_ID) {
+    showError('No job ID found. Please go back and upload a video.');
+    return;
+  }
+
   setupContextMenu();
   setupFilterTabs();
   setupSearch();
   setupLufsButtons();
   setupFillerTags();
+
   await loadTranscript();
 });
 
 
-// ── LOAD TRANSCRIPT ───────────────────────────────────────────────────────────
-
 async function loadTranscript() {
   try {
     const res = await fetch(`${API}/transcript/${JOB_ID}`);
-    if (!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Server error ${res.status}: ${text}`);
+    }
     const data = await res.json();
 
+    // Defensive access — log full shape if anything is missing
     if (!data.words || !Array.isArray(data.words)) {
       console.error('Unexpected response shape:', data);
       throw new Error('Server returned unexpected data shape — check console');
@@ -55,14 +63,24 @@ async function loadTranscript() {
 
     renderTranscript();
     updateStats();
+    initMediaAndTimeline();
   } catch (err) {
     console.error('loadTranscript error:', err);
     showError(`Failed to load transcript: ${err.message}`);
   }
 }
 
+function initMediaAndTimeline() {
+  const videoEl     = document.getElementById('videoEl');
+  const placeholder = document.getElementById('videoPlaceholder');
+  videoEl.src = `${API}/video/${JOB_ID}`;
+  videoEl.style.display = 'block';
+  if (placeholder) placeholder.style.display = 'none';
+  timeline.init(`${API}/audio/${JOB_ID}`, videoEl);
+}
 
-// ── TRANSCRIPT RENDERING ──────────────────────────────────────────────────────
+
+// ── TRANSCRIPT RENDERING ─────────────────────────────────────────────────────
 
 function renderTranscript() {
   const body = document.getElementById('transcriptBody');
@@ -73,9 +91,13 @@ function renderTranscript() {
     return;
   }
 
-  const blocks = groupIntoBlocks(words, operations);
-  let html = '';
+  // Build a lookup: timestamp → operation
+  const opByRange = buildOpLookup(operations);
 
+  // Group words into "blocks" separated by silences
+  const blocks = groupIntoBlocks(words, operations);
+
+  let html = '';
   for (const block of blocks) {
     if (block.type === 'silence') {
       const op = block.operation;
@@ -93,19 +115,23 @@ function renderTranscript() {
       continue;
     }
 
+    // Filter logic
     if (activeFilter === 'silence') continue;
 
-    const hasMatch = block.words.some(w => {
+    const blockWords = block.words.filter(w => {
       const tag = getWordTag(w, operations);
       if (activeFilter === 'filler' && tag !== 'filler') return false;
-      if (activeFilter === 'cut' && tag !== 'cut' && tag !== 'bleep' && tag !== 'mute') return false;
+      if (activeFilter === 'cut' && tag !== 'cut' && tag !== 'bleep') return false;
       if (searchQuery && !w.word.toLowerCase().includes(searchQuery)) return false;
       return true;
     });
-    if (!hasMatch && (activeFilter !== 'all' || searchQuery)) continue;
+
+    if (blockWords.length === 0) continue;
 
     const timeLabel = formatTime(block.words[0]?.start ?? 0);
-    html += `<div class="t-block"><div class="t-time">${timeLabel}</div><div class="t-words">`;
+    html += `<div class="t-block">
+      <div class="t-time">${timeLabel}</div>
+      <div class="t-words">`;
 
     for (const w of block.words) {
       if (searchQuery && !w.word.toLowerCase().includes(searchQuery)) continue;
@@ -116,7 +142,9 @@ function renderTranscript() {
     html += `</div></div>`;
   }
 
-  if (!html) html = '<p class="no-results">Nothing matches this filter.</p>';
+  if (!html) {
+    html = '<p class="no-results">Nothing matches this filter.</p>';
+  }
 
   body.innerHTML = html;
   attachWordEvents();
@@ -125,21 +153,16 @@ function renderTranscript() {
 
 function renderWord(word, tag) {
   const cls = tag ? `word ${tag}` : 'word';
-  let text = word.word;
-  if (tag === 'bleep') text = '[bleep]';
-  else if (tag === 'mute') text = '[mute]';
+  const text = tag === 'bleep' ? '[bleep]' : word.word;
   return `<span class="${cls}" data-start="${word.start}" data-end="${word.end}" data-word="${escapeAttr(word.word)}">${escapeHtml(text)}</span>`;
 }
 
 
-// Fixed: no const inside for-of to avoid TDZ issues in some browsers
 function getWordTag(word, operations) {
-  for (let i = 0; i < operations.length; i++) {
-    const op = operations[i];
+  for (const op of operations) {
     if (!op.enabled) continue;
     if (word.start >= op.start && word.end <= op.end + 0.05) {
       if (op.type === 'bleep') return 'bleep';
-      if (op.type === 'mute')  return 'mute';
       return 'cut';
     }
   }
@@ -156,12 +179,14 @@ function groupIntoBlocks(words, operations) {
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     const nextW = words[i + 1];
+
     currentBlock.words.push(w);
 
     if (nextW) {
       const gap = nextW.start - w.end;
       const silOp = silenceOps.find(op =>
-        Math.abs(op.start - w.end) < 0.1 && Math.abs(op.end - nextW.start) < 0.1
+        Math.abs(op.start - w.end) < 0.1 &&
+        Math.abs(op.end - nextW.start) < 0.1
       );
       if (gap >= 0.5 || silOp) {
         blocks.push(currentBlock);
@@ -179,8 +204,7 @@ function groupIntoBlocks(words, operations) {
 
 function buildOpLookup(operations) {
   const map = {};
-  for (let i = 0; i < operations.length; i++) {
-    const op = operations[i];
+  for (const op of operations) {
     map[`${op.start}-${op.end}`] = op;
   }
   return map;
@@ -191,44 +215,16 @@ function buildOpLookup(operations) {
 
 function attachWordEvents() {
   document.querySelectorAll('.word').forEach(el => {
-
-    // RIGHT-CLICK → context menu (always)
     el.addEventListener('contextmenu', e => {
       e.preventDefault();
       state.ctxWord = el;
       showCtxMenu(e.clientX, e.clientY, el.dataset.word);
     });
-
-    // LEFT-CLICK:
-    // - If word is bleped → switch to mute
-    // - If word is muted  → switch to bleep
-    // - Otherwise         → just close ctx menu (no action)
-    el.addEventListener('click', e => {
+    el.addEventListener('click', () => {
       hideCtxMenu();
-
-      const tag = el.classList.contains('bleep') ? 'bleep'
-                : el.classList.contains('mute')  ? 'mute'
-                : null;
-
-      if (!tag) return; // normal word — do nothing on left click
-
-      e.stopPropagation();
-      const start = parseFloat(el.dataset.start);
-      const end   = parseFloat(el.dataset.end);
-
-      // Remove the existing bleep/mute op and replace with the other
-      saveHistory();
-      state.operations = state.operations.filter(op =>
-        !(op.start <= start + 0.05 && op.end >= end - 0.05 &&
-          (op.type === 'bleep' || op.type === 'mute'))
-      );
-
-      const newType = tag === 'bleep' ? 'mute' : 'bleep';
-      const id = Math.max(0, ...state.operations.map(o => o.id)) + 1;
-      state.operations.push({ id, enabled: true, type: newType, start, end });
-
-      renderTranscript();
-      updateStats();
+      // Seek video/waveform to word start on click
+      const t = parseFloat(el.dataset.start);
+      if (!isNaN(t)) timeline.onWordClick(t);
     });
   });
 }
@@ -237,8 +233,8 @@ function attachWordEvents() {
 function showCtxMenu(x, y, word) {
   const menu = document.getElementById('ctxMenu');
   document.getElementById('ctxWordLabel').textContent = word;
-  menu.style.left = Math.min(x, window.innerWidth - 190) + 'px';
-  menu.style.top  = Math.min(y, window.innerHeight - 200) + 'px';
+  menu.style.left = Math.min(x, window.innerWidth - 180) + 'px';
+  menu.style.top = Math.min(y, window.innerHeight - 180) + 'px';
   menu.classList.add('visible');
 }
 
@@ -248,7 +244,6 @@ function hideCtxMenu() {
 
 function setupContextMenu() {
   document.addEventListener('click', () => hideCtxMenu());
-
   document.querySelectorAll('.ctx-item').forEach(item => {
     item.addEventListener('click', () => {
       const action = item.dataset.action;
@@ -259,10 +254,10 @@ function setupContextMenu() {
       const end   = parseFloat(el.dataset.end);
       const word  = el.dataset.word;
 
-      if (action === 'cut')            addOperation({ type: 'cut_manual', start, end });
-      if (action === 'bleep')          addOperation({ type: 'bleep', start, end });
-      if (action === 'mute')           addOperation({ type: 'mute',  start, end });
-      if (action === 'restore')        removeOperationsAt(start, end);
+      if (action === 'cut')      addOperation({ type: 'cut_manual', start, end });
+      if (action === 'bleep')    addOperation({ type: 'bleep', start, end });
+      if (action === 'mute')     addOperation({ type: 'mute',  start, end });
+      if (action === 'restore')  removeOperationsAt(start, end);
       if (action === 'cut-all-similar') cutAllSimilar(word);
 
       hideCtxMenu();
@@ -271,19 +266,15 @@ function setupContextMenu() {
 }
 
 
-// ── OPERATION MANAGEMENT ──────────────────────────────────────────────────────
+// ── OPERATION MANAGEMENT ─────────────────────────────────────────────────────
 
 function addOperation(op) {
   saveHistory();
-  // Remove any existing op at the same range before adding new one
-  state.operations = state.operations.filter(existing =>
-    !(existing.start <= op.start + 0.05 && existing.end >= op.end - 0.05 &&
-      (existing.type === 'bleep' || existing.type === 'mute' || existing.type === 'cut_manual'))
-  );
-  const id = (state.operations.length ? Math.max(...state.operations.map(o => o.id)) : 0) + 1;
+  const id = Math.max(0, ...state.operations.map(o => o.id)) + 1;
   state.operations.push({ id, enabled: true, ...op });
   renderTranscript();
   updateStats();
+  timeline.refresh(state.operations);
 }
 
 function removeOperationsAt(start, end) {
@@ -293,6 +284,7 @@ function removeOperationsAt(start, end) {
   );
   renderTranscript();
   updateStats();
+  timeline.refresh(state.operations);
 }
 
 function cutAllSimilar(word) {
@@ -313,13 +305,17 @@ function toggleSilence(el) {
   if (op) op.enabled = !op.enabled;
   renderTranscript();
   updateStats();
+  timeline.refresh(state.operations);
 }
+
 window.toggleSilence = toggleSilence;
 
 function autoClean() {
   saveHistory();
   state.operations.forEach(op => {
-    if (op.type === 'cut_filler' || op.type === 'cut_silence') op.enabled = true;
+    if (op.type === 'cut_filler' || op.type === 'cut_silence') {
+      op.enabled = true;
+    }
   });
   renderTranscript();
   updateStats();
@@ -340,7 +336,7 @@ function saveHistory() {
 }
 
 window.autoClean = autoClean;
-window.undoAll   = undoAll;
+window.undoAll = undoAll;
 
 
 // ── FILTER TABS ───────────────────────────────────────────────────────────────
@@ -370,16 +366,6 @@ function setupSearch() {
 // ── AUDIO SETTINGS ────────────────────────────────────────────────────────────
 
 function setupLufsButtons() {
-  const loudnormToggle = document.getElementById('opt-loud');
-  const lufsOptions    = document.getElementById('lufsOptions');
-
-  // Show/hide LUFS presets based on loudnorm toggle
-  function syncLufs() {
-    if (lufsOptions) lufsOptions.style.opacity = loudnormToggle.checked ? '1' : '0.35';
-    if (lufsOptions) lufsOptions.style.pointerEvents = loudnormToggle.checked ? 'auto' : 'none';
-  }
-  if (loudnormToggle) { loudnormToggle.addEventListener('change', syncLufs); syncLufs(); }
-
   document.querySelectorAll('.lufs-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.lufs-btn').forEach(b => b.classList.remove('active'));
@@ -393,11 +379,12 @@ function setupFillerTags() {
   document.querySelectorAll('.filler-tag').forEach(tag => {
     tag.addEventListener('click', () => {
       tag.classList.toggle('active');
+      // Re-run filler detection with updated word list
       saveHistory();
       const activeFillers = [...document.querySelectorAll('.filler-tag.active')]
         .map(t => t.dataset.word);
       state.words.forEach(w => {
-        w.is_filler = activeFillers.includes(w.word.toLowerCase().replace(/[.,!?]/g, ''));
+        w.is_filler = activeFillers.includes(w.word.toLowerCase().trim('.,!?'));
       });
       renderTranscript();
       updateStats();
@@ -409,20 +396,19 @@ function setupFillerTags() {
 // ── STATS ─────────────────────────────────────────────────────────────────────
 
 function updateStats() {
-  const enabled   = state.operations.filter(op => op.enabled);
-  const silences  = enabled.filter(op => op.type === 'cut_silence').length;
-  const fillers   = enabled.filter(op => op.type === 'cut_filler' || op.type === 'cut_manual').length;
-  const bleeps    = enabled.filter(op => op.type === 'bleep').length;
-  const mutes     = enabled.filter(op => op.type === 'mute').length;
+  const enabled = state.operations.filter(op => op.enabled);
+  const silences = enabled.filter(op => op.type === 'cut_silence').length;
+  const fillers  = enabled.filter(op => op.type === 'cut_filler' || op.type === 'cut_manual').length;
+  const bleeps   = enabled.filter(op => op.type === 'bleep').length;
+
   const totalCutSec = enabled
-    .filter(op => op.type !== 'bleep' && op.type !== 'mute')
+    .filter(op => op.type !== 'bleep')
     .reduce((sum, op) => sum + (op.end - op.start), 0);
 
   document.getElementById('editStats').innerHTML =
     `<span class="stat filler">${fillers} fillers</span>` +
     `<span class="stat silence">${silences} silences</span>` +
     (bleeps ? `<span class="stat bleep">${bleeps} bleeps</span>` : '') +
-    (mutes  ? `<span class="stat mute">${mutes} mutes</span>`   : '') +
     `<span class="stat time">−${totalCutSec.toFixed(1)}s</span>`;
 }
 
@@ -431,8 +417,8 @@ function updateStats() {
 
 function openExportPanel() {
   const enabled = state.operations.filter(op => op.enabled);
-  const cutSec  = enabled
-    .filter(op => op.type !== 'bleep' && op.type !== 'mute')
+  const cutSec = enabled
+    .filter(op => op.type !== 'bleep')
     .reduce((sum, op) => sum + (op.end - op.start), 0);
 
   document.getElementById('exportSummary').innerHTML =
@@ -455,20 +441,21 @@ async function startRender() {
 
   const payload = {
     job_id: JOB_ID,
-    operations: state.operations,
+    // Merge word-level ops + free-draw timeline cuts
+    operations: [...state.operations, ...timeline.getFreeCuts()],
     audio: {
-      noise_gate:  document.getElementById('opt-noise').checked,
-      compressor:  document.getElementById('opt-comp').checked,
-      loudnorm:    document.getElementById('opt-loud').checked,
+      noise_gate: document.getElementById('opt-noise').checked,
+      compressor: document.getElementById('opt-comp').checked,
+      loudnorm: document.getElementById('opt-loud').checked,
       target_lufs: state.targetLufs,
     },
   };
 
   try {
     const res = await fetch(`${API}/render`, {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
     setRenderProgress(30);
@@ -482,7 +469,7 @@ async function startRender() {
 async function pollRender() {
   const interval = setInterval(async () => {
     try {
-      const res  = await fetch(`${API}/status/${JOB_ID}`);
+      const res = await fetch(`${API}/status/${JOB_ID}`);
       const data = await res.json();
       if (data.status === 'rendering') {
         setRenderProgress(30 + Math.random() * 40);
@@ -491,7 +478,9 @@ async function pollRender() {
         clearInterval(interval);
         setRenderProgress(100);
         setRenderStatus('Done! Downloading...');
-        setTimeout(() => { window.location.href = `${API}/download/${JOB_ID}`; }, 800);
+        setTimeout(() => {
+          window.location.href = `${API}/download/${JOB_ID}`;
+        }, 800);
       } else if (data.status === 'error') {
         clearInterval(interval);
         setRenderStatus(`Render failed: ${data.error}`);
@@ -500,12 +489,16 @@ async function pollRender() {
   }, 2000);
 }
 
-function setRenderProgress(pct) { document.getElementById('renderBar').style.width = Math.min(pct, 100) + '%'; }
-function setRenderStatus(msg)    { document.getElementById('renderStatus').textContent = msg; }
+function setRenderProgress(pct) {
+  document.getElementById('renderBar').style.width = Math.min(pct, 100) + '%';
+}
+function setRenderStatus(msg) {
+  document.getElementById('renderStatus').textContent = msg;
+}
 
-window.openExportPanel  = openExportPanel;
+window.openExportPanel = openExportPanel;
 window.closeExportPanel = closeExportPanel;
-window.startRender      = startRender;
+window.startRender = startRender;
 
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
@@ -525,5 +518,6 @@ function escapeAttr(str) {
 }
 
 function showError(msg) {
-  document.getElementById('transcriptBody').innerHTML = `<div class="error-msg">${msg}</div>`;
+  document.getElementById('transcriptBody').innerHTML =
+    `<div class="error-msg">${msg}</div>`;
 }

@@ -7,6 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <!-- WaveSurfer + Regions plugin -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.4/wavesurfer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.4/plugin/wavesurfer.regions.min.js"></script>
 </head>
 <body class="editor-page">
 
@@ -37,91 +40,145 @@
     </div>
   </header>
 
-  <!-- MAIN LAYOUT -->
-  <div class="editor-layout">
+  <!-- MAIN LAYOUT: left panel + transcript, then timeline below both -->
+  <div class="editor-body">
 
-    <!-- LEFT: video preview + audio tools -->
-    <aside class="left-panel">
+    <div class="editor-layout">
 
-      <div class="video-preview" id="videoPreview">
-        <div class="video-placeholder">
-          <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-            <circle cx="20" cy="20" r="16" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
-            <path d="M17 14l10 6-10 6V14z" fill="rgba(255,255,255,0.4)"/>
-          </svg>
-        </div>
-      </div>
+      <!-- LEFT: video preview + audio tools -->
+      <aside class="left-panel">
 
-      <div class="panel-section">
-        <div class="section-label">Audio processing</div>
-
-        <div class="audio-tool">
-          <label class="tool-label">
-            <span>Noise reduction</span>
-            <input type="checkbox" id="opt-noise" checked>
-            <span class="toggle-ui"></span>
-          </label>
-        </div>
-
-        <div class="audio-tool">
-          <label class="tool-label">
-            <span>Compressor</span>
-            <input type="checkbox" id="opt-comp" checked>
-            <span class="toggle-ui"></span>
-          </label>
-        </div>
-
-        <div class="audio-tool">
-          <label class="tool-label">
-            <span>Loudness normalize</span>
-            <input type="checkbox" id="opt-loud" checked>
-            <span class="toggle-ui"></span>
-          </label>
-          <div class="lufs-options" id="lufsOptions">
-            <button class="lufs-btn active" data-lufs="-14">-14 <small>YouTube</small></button>
-            <button class="lufs-btn" data-lufs="-16">-16 <small>Spotify</small></button>
-            <button class="lufs-btn" data-lufs="-23">-23 <small>Broadcast</small></button>
+        <!-- Real video element -->
+        <div class="video-preview">
+          <video id="videoEl" playsinline preload="metadata"
+            style="width:100%;height:100%;display:none;object-fit:contain;background:#111;">
+          </video>
+          <div class="video-placeholder" id="videoPlaceholder">
+            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+              <circle cx="20" cy="20" r="16" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+              <path d="M17 14l10 6-10 6V14z" fill="rgba(255,255,255,0.4)"/>
+            </svg>
           </div>
         </div>
+
+        <div class="panel-section">
+          <div class="section-label">Audio processing</div>
+          <div class="audio-tool">
+            <label class="tool-label">
+              <span>Noise reduction</span>
+              <input type="checkbox" id="opt-noise" checked>
+              <span class="toggle-ui"></span>
+            </label>
+          </div>
+          <div class="audio-tool">
+            <label class="tool-label">
+              <span>Compressor</span>
+              <input type="checkbox" id="opt-comp" checked>
+              <span class="toggle-ui"></span>
+            </label>
+          </div>
+          <div class="audio-tool">
+            <label class="tool-label">
+              <span>Loudness normalize</span>
+              <input type="checkbox" id="opt-loud" checked>
+              <span class="toggle-ui"></span>
+            </label>
+            <div class="lufs-options" id="lufsOptions">
+              <button class="lufs-btn active" data-lufs="-14">-14 <small>YouTube</small></button>
+              <button class="lufs-btn" data-lufs="-16">-16 <small>Spotify</small></button>
+              <button class="lufs-btn" data-lufs="-23">-23 <small>Broadcast</small></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-label">Filler words</div>
+          <div class="filler-tags" id="fillerTags">
+            <span class="filler-tag active" data-word="um">um</span>
+            <span class="filler-tag active" data-word="uh">uh</span>
+            <span class="filler-tag active" data-word="like">like</span>
+            <span class="filler-tag active" data-word="you know">you know</span>
+            <span class="filler-tag active" data-word="basically">basically</span>
+            <span class="filler-tag active" data-word="literally">literally</span>
+          </div>
+          <p class="hint-text">Click to toggle. Right-click a word to add custom.</p>
+        </div>
+
+      </aside>
+
+      <!-- RIGHT: transcript -->
+      <main class="transcript-panel">
+        <div class="transcript-toolbar">
+          <div class="filter-tabs">
+            <button class="filter-tab active" data-filter="all">All</button>
+            <button class="filter-tab" data-filter="filler">Fillers</button>
+            <button class="filter-tab" data-filter="silence">Silences</button>
+            <button class="filter-tab" data-filter="cut">Marked for cut</button>
+          </div>
+          <div class="search-box">
+            <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9.5 9.5l2.5 2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <input type="text" id="searchInput" placeholder="Search transcript...">
+          </div>
+        </div>
+        <div class="transcript-body" id="transcriptBody">
+          <div class="transcript-loading">
+            <div class="spinner"></div>
+            Loading transcript...
+          </div>
+        </div>
+      </main>
+
+    </div><!-- /.editor-layout -->
+
+    <!-- TIMELINE — spans full width below both panels -->
+    <div class="timeline-panel" id="timelinePanel">
+
+      <!-- Transport controls -->
+      <div class="tl-controls">
+        <button class="tl-btn" id="tlPlayBtn" title="Play/Pause (Space)">
+          <svg width="16" height="16" viewBox="0 0 16 16" id="tlPlayIcon">
+            <path d="M5 3l11 6-11 6V3z" fill="currentColor"/>
+          </svg>
+        </button>
+        <button class="tl-btn" onclick="timeline.seekTo(0)" title="Go to start">
+          <svg width="16" height="16" viewBox="0 0 16 16">
+            <path d="M4 3v10M7 8l7-5v10L7 8z" fill="currentColor"/>
+          </svg>
+        </button>
+        <span class="tl-timecode">
+          <span id="tlCurrent">0:00</span>
+          <span class="tl-sep">/</span>
+          <span id="tlDuration">0:00</span>
+        </span>
+        <div class="tl-speed-group">
+          <button class="tl-speed-btn" data-speed="0.5">0.5×</button>
+          <button class="tl-speed-btn" data-speed="0.75">0.75×</button>
+          <button class="tl-speed-btn active" data-speed="1">1×</button>
+          <button class="tl-speed-btn" data-speed="1.5">1.5×</button>
+          <button class="tl-speed-btn" data-speed="2">2×</button>
+        </div>
+        <span class="tl-hint">Space: play/pause · ← →: ±5s · drag waveform to draw cut · right-click cut to remove</span>
       </div>
 
-      <div class="panel-section">
-        <div class="section-label">Filler words</div>
-        <div class="filler-tags" id="fillerTags">
-          <span class="filler-tag active" data-word="um">um</span>
-          <span class="filler-tag active" data-word="uh">uh</span>
-          <span class="filler-tag active" data-word="like">like</span>
-          <span class="filler-tag active" data-word="you know">you know</span>
-          <span class="filler-tag active" data-word="basically">basically</span>
-          <span class="filler-tag active" data-word="literally">literally</span>
-        </div>
-        <p class="hint-text">Click to toggle. Right-click a word in transcript to add custom.</p>
-      </div>
-    </aside>
-
-    <!-- RIGHT: transcript -->
-    <main class="transcript-panel">
-      <div class="transcript-toolbar">
-        <div class="filter-tabs">
-          <button class="filter-tab active" data-filter="all">All</button>
-          <button class="filter-tab" data-filter="filler">Fillers</button>
-          <button class="filter-tab" data-filter="silence">Silences</button>
-          <button class="filter-tab" data-filter="cut">Marked for cut</button>
-        </div>
-        <div class="search-box">
-          <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M9.5 9.5l2.5 2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-          <input type="text" id="searchInput" placeholder="Search transcript...">
-        </div>
+      <!-- Waveform -->
+      <div class="tl-waveform-wrap">
+        <div id="waveform"></div>
+        <!-- region label style injected here -->
       </div>
 
-      <div class="transcript-body" id="transcriptBody">
-        <div class="transcript-loading">
-          <div class="spinner"></div>
-          Loading transcript...
-        </div>
+      <!-- Legend -->
+      <div class="tl-legend">
+        <span class="tl-legend-item" style="--c:rgba(24,95,165,0.5)">silence cut</span>
+        <span class="tl-legend-item" style="--c:rgba(186,117,23,0.5)">filler cut</span>
+        <span class="tl-legend-item" style="--c:rgba(163,45,45,0.5)">manual cut</span>
+        <span class="tl-legend-item" style="--c:rgba(83,74,183,0.5)">bleep</span>
+        <span class="tl-legend-item" style="--c:rgba(100,100,95,0.5)">mute</span>
+        <span class="tl-legend-item" style="--c:rgba(30,30,30,0.25);border:1px dashed rgba(30,30,30,0.4)">free cut</span>
       </div>
-    </main>
-  </div>
+
+    </div><!-- /.timeline-panel -->
+
+  </div><!-- /.editor-body -->
 
   <!-- CONTEXT MENU -->
   <div class="ctx-menu" id="ctxMenu">
@@ -131,10 +188,10 @@
     </div>
     <div class="ctx-item" data-action="bleep">
       <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M5 4v6M9 3v8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
-      Bleep / censor
+      Bleep
     </div>
     <div class="ctx-item" data-action="mute">
-      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 5h10v4H2z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 5V3M9 5V3M5 9v2M9 9v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 5h4l4-3v12l-4-3H2V5z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M11 5.5a3 3 0 010 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/><path d="M2 2l10 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
       Mute (silence)
     </div>
     <div class="ctx-item" data-action="cut-all-similar">
@@ -177,6 +234,7 @@
     </div>
   </div>
 
+  <script src="timeline.js"></script>
   <script src="editor.js"></script>
 </body>
 </html>
