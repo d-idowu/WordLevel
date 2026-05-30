@@ -31,24 +31,46 @@ client/
   editor.html      Main editor UI shell
   editor.js        All editor logic, state management, export, keyboard shortcuts
   timeline.js      WaveSurfer waveform, playback, regions, free cuts
-  style.css        Design tokens + all component styles
+  style.css        Shared styles
 ```
 
 ## API endpoints
-- `POST /upload`               receive video, start transcription bg task, return job_id
-- `GET  /status/{job_id}`      poll: uploaded / transcribing / ready / rendering / rendered / error
-- `GET  /transcript/{job_id}`  return { words, edl } once ready
-- `POST /render`               accept { job_id, operations, audio }, start render bg task
-- `GET  /download/{job_id}`    return finished mp4
-- `GET  /video/{job_id}`       stream original video to <video> element for preview
-- `GET  /audio/{job_id}`       extract + cache 64k mono mp3 for WaveSurfer waveform
-- `GET  /sessions`             return list of resumable sessions (ready/rendered, video still on disk)
+- `POST /upload`                  receive video, start transcription bg task, return job_id
+- `GET  /status/{job_id}`         poll: uploaded / transcribing / ready / rendering / rendered / error
+- `GET  /transcript/{job_id}`     return { words, edl, display_name } once ready
+- `POST /render`                  accept { job_id, operations, audio, output_filename }, start render bg task
+- `GET  /download/{job_id}`       return finished mp4 using output_filename or display_name
+- `GET  /video/{job_id}`          stream original video to <video> element for preview
+- `GET  /audio/{job_id}`          extract + cache 64k mono mp3 for WaveSurfer waveform
+- `GET  /sessions`                return list of resumable sessions (ready/rendered, video still on disk)
+- `PATCH /sessions/{job_id}`      rename a session's display_name — persists to SQLite
+- `DELETE /sessions/{job_id}`     delete session from SQLite + hot cache + disk files
+
+## SQLite schema (db.py)
+```sql
+CREATE TABLE jobs (
+    job_id        TEXT PRIMARY KEY,
+    status        TEXT NOT NULL DEFAULT 'uploaded',
+    filename      TEXT,           -- original upload filename, never changes
+    display_name  TEXT,           -- user-editable name shown in UI
+    video_path    TEXT,
+    words_json    TEXT,
+    edl_json      TEXT,
+    error         TEXT,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+```
+- `display_name` column added via ALTER TABLE migration on startup (safe for existing DBs)
+- `filename` = original upload name, never mutated
+- `display_name` = user-facing name; falls back to `filename` if null
 
 ## JS state shape (editor.js)
 ```js
 state = {
   words: [],          // [{ word, start, end, confidence, is_filler }]
   operations: [],     // [{ id, type, start, end, enabled }]
+  displayName: '',    // pre-filled from API display_name, used for export filename
   activeFilter: 'all',
   searchQuery: '',
   targetLufs: -14,
@@ -86,17 +108,35 @@ state = {
   - Restored on editor load with a dismissable "Session restored" banner
   - "Start fresh" button clears localStorage and reloads from server EDL
 
+## Sessions panel (index.html)
+- Fetches `GET /sessions` on page load; hidden if server offline or no sessions
+- Shows below the drop zone and feature pills
+- Each session card shows:
+  - File icon, display_name, relative timestamp ("2h ago"), status dot (purple=ready, teal=exported)
+  - **Inline rename**: click the name or the pencil icon → text input appears in place
+    - Commits on blur or Enter, cancels on Escape
+    - Once user edits the field it won't be auto-overwritten on re-open
+    - PATCHes `/sessions/{job_id}` to persist to SQLite
+  - **Resume button**: links to `editor.html?job={job_id}`
+  - **Delete button**: two-step confirm (card turns red, shows "Delete? / Yes / Cancel")
+    - On confirm: DELETEs from server (SQLite + disk files) and removes card from DOM
+
+## Export panel (editor.html / editor.js)
+- Output filename field added between summary and format selector
+- Pre-filled with `state.displayName` (stripped of extension) when panel opens
+- Once user manually edits the field, auto-fill stops (tracked via `data-user-edited`)
+- `output_filename` sent in render payload as `stem + '.mp4'`
+- Server uses `output_filename` as the download filename; falls back to display_name then filename
+
 ## Keyboard shortcuts (editor.js)
-- `Delete` / `Backspace`       cut the word currently under the playhead
-- `Cmd+Z` / `Ctrl+Z`           undo (pops history stack)
-- `Cmd+Shift+Z` / `Ctrl+Y`     redo (pops future stack)
-- `Space`                      play / pause (timeline.js)
-- `← →`                        seek ±5s (timeline.js)
+- `Delete` / `Backspace`          cut the word currently under the playhead
+- `Cmd+Z` / `Ctrl+Z`              undo (pops history stack)
+- `Cmd+Shift+Z` / `Ctrl+Y`        redo — FIXED: uses `e.key.toLowerCase()` so Shift+Z works cross-browser
+- `Space`                         play / pause (timeline.js)
+- `← →`                           seek ±5s (timeline.js)
 
 ## Word token behaviour
 **Left click** on word → seeks video/waveform to that word's timestamp
-**Left click** on bleep word → switches to mute
-**Left click** on mute word → switches to bleep
 **Right click** → context menu (cut / bleep / mute / cut-all-similar / restore)
 
 ## Context menu actions
@@ -110,15 +150,12 @@ state = {
 - WaveSurfer volume=0 always (waveform display only, video el handles all audio)
 - Sync: video timeupdate → ws.seekTo via wsSeeking flag to suppress feedback loop
 - userSeeking flag (mousedown on waveform) allows human scrub → video seek
-- wsSeeking flag suppresses ws.on('seek') bouncing back when we call ws.seekTo/ws.play
 - Op regions: resize=true, drag=false — drag edges to adjust cut timing
-  - update-end event writes back to state.operations + re-renders transcript
 - Free-draw: dragSelection enabled — drag empty area to create free_cut region
   - Right-click free-cut region to delete it
   - Free cuts included in render payload merged with word ops
-  - Words overlapping free-cut zone get `.in-free-cut` tint (passive/informational only)
+  - Words overlapping free-cut zone get `.in-free-cut` tint (informational only)
 - Speed buttons: 0.5× 0.75× 1× 1.5× 2× → sets videoEl.playbackRate
-- Keyboard: Space play/pause, ← → ±5s (handled in timeline.js)
 
 ## CSS design tokens
 ```
@@ -143,28 +180,30 @@ state = {
 ## Known Bugs
 - Timeline not fully synced to video — cursor races ahead if video is buffering, then jumps back
 - Timeline glitches when jumping around during playback (same root cause as above)
-- Go-to-start button doesn't work (ws.seekTo(0) WaveSurfer 6 no-op bug, epsilon workaround attempted but unresolved)
+- Go-to-start button doesn't work (ws.seekTo(0) WaveSurfer 6 no-op bug)
 
-## Known fixed bugs
-- Audio doubling: WaveSurfer volume=0, ws.play() never called
-- Seek glitch (~0.2s jump): one-directional sync + userSeeking flag
-- Bleep noise at t=0: fixed with adelay (positions tone correctly)
-- Mute doing nothing: mute ops now collected separately in render.py
-- Bleep actually muting: aevalsrc + adelay + amix replaces old broken approach
-- 'No such filter empty string': was malformed filter_complex string with trailing comma
-- TDZ error 'can't access lexical declaration': for..of with const replaced with indexed for loops
-- Timeline play button not working: wsSeeking flag prevents ws.play() seek event bouncing to videoEl
+## Fixed bugs (this session)
+- **Redo shortcut broken**: `e.key === 'z'` failed when Shift held (browsers fire 'Z') → fixed with `.toLowerCase()`
+- **Save not persisting filler tag toggles**: `persistOps()` was missing from `setupFillerTags` click handler
+- **Op id NaN corruption**: `Math.max(...ids)` with any NaN id propagated NaN to new ops, breaking localStorage round-trip → fixed with `.filter(Number.isFinite)`
+- **Auto-clean didn't update waveform**: `timeline.refresh()` was missing from `autoClean()`
+- **Sessions panel missing from index.html**: panel existed in server but frontend never fetched/rendered it — rebuilt
+- **No way to rename sessions**: added inline rename on session cards → PATCHes SQLite
+- **No way to delete sessions**: added two-step confirm delete → DELETEs from SQLite + disk
+- **Export filename not customisable**: added filename input to export panel, pre-filled from display_name
+- **display_name column missing from DB**: added column + ALTER TABLE migration for existing DBs
 
 ## Backlog (priority order)
 1. AI-contextual filler detection (send transcript to Claude, get per-word confidence)
 2. "Bleep all / Mute all similar" in context menu
 3. Threshold slider for silence detection (re-runs EDL with new min_silence value)
 4. Dual-mode timeline: switch between Original and Edited preview
-5. Add Icons to represent fillers silences and freecuts and bleeps
+5. Add icons to represent fillers, silences, free cuts and bleeps
 6. Audio processing stats display (LUFS before/after via ffmpeg ebur128)
 7. Export EDL / Premiere XML
 8. "Tighten cuts" — compress silence to 0.2s instead of removing entirely
 9. Batch processing multiple videos
+10. LUFS preset buttons grey out when loudness normalize toggle is off
 
 ## How to start a new session efficiently
 1. Upload latest .rar of the project

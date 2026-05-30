@@ -28,6 +28,7 @@ def init_db():
                 job_id      TEXT PRIMARY KEY,
                 status      TEXT NOT NULL DEFAULT 'uploaded',
                 filename    TEXT,
+                display_name TEXT,
                 video_path  TEXT,
                 words_json  TEXT,
                 edl_json    TEXT,
@@ -36,13 +37,18 @@ def init_db():
                 updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migration: add display_name column if it doesn't exist yet
+        # (handles existing DBs created before this column was added)
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN display_name TEXT")
+        except Exception:
+            pass  # column already exists
         conn.commit()
 
 
 def upsert_job(job_id: str, **fields):
     """Insert or update a job row. Pass only the fields you want to set."""
     with get_conn() as conn:
-        # Check if exists
         row = conn.execute("SELECT job_id FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         if row:
             set_clause = ", ".join(f"{k} = ?" for k in fields)

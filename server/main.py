@@ -42,12 +42,13 @@ jobs: dict = {}
 def _job_to_mem(db_row: dict) -> dict:
     """Convert a DB row into the in-memory jobs dict shape."""
     return {
-        "status":     db_row["status"],
-        "filename":   db_row["filename"],
-        "video_path": db_row["video_path"],
-        "transcript": db_row["words"],
-        "edl":        db_row["edl"],
-        "error":      db_row["error"],
+        "status":       db_row["status"],
+        "filename":     db_row["filename"],
+        "display_name": db_row.get("display_name") or db_row["filename"],
+        "video_path":   db_row["video_path"],
+        "transcript":   db_row["words"],
+        "edl":          db_row["edl"],
+        "error":        db_row["error"],
     }
 
 
@@ -56,7 +57,6 @@ async def startup():
     """Init DB and reload all known jobs into the hot cache."""
     init_db()
     for row in load_all_jobs():
-        # Only restore jobs whose video file still exists on disk
         if row["video_path"] and Path(row["video_path"]).exists():
             jobs[row["job_id"]] = _job_to_mem(row)
     print(f"[startup] Restored {len(jobs)} job(s) from DB")
@@ -81,6 +81,10 @@ class RenderRequest(BaseModel):
     job_id: str
     operations: List[CutOperation]
     audio: AudioSettings
+    output_filename: Optional[str] = None
+
+class RenameRequest(BaseModel):
+    display_name: str
 
 
 # ── ROUTES ────────────────────────────────────────────────────────────────────
@@ -103,12 +107,78 @@ async def list_sessions():
         if not row["video_path"] or not Path(row["video_path"]).exists():
             continue
         sessions.append({
-            "job_id":    row["job_id"],
-            "filename":  row["filename"],
-            "status":    row["status"],
-            "updated_at": row["updated_at"],
+            "job_id":       row["job_id"],
+            "filename":     row["filename"],
+            "display_name": row.get("display_name") or row["filename"],
+            "status":       row["status"],
+            "updated_at":   row["updated_at"],
         })
     return {"sessions": sessions}
+
+
+@app.patch("/sessions/{job_id}")
+async def rename_session(job_id: str, req: RenameRequest):
+    """Rename a session's display name. Persists to SQLite."""
+    name = req.display_name.strip()
+    if not name:
+        raise HTTPException(400, "display_name cannot be empty")
+    if len(name) > 120:
+        raise HTTPException(400, "display_name too long (max 120 chars)")
+
+    row = load_job(job_id)
+    if not row:
+        raise HTTPException(404, "Job not found")
+
+    upsert_job(job_id, display_name=name)
+    if job_id in jobs:
+        jobs[job_id]["display_name"] = name
+
+    return {"job_id": job_id, "display_name": name}
+
+
+@app.delete("/sessions/{job_id}")
+async def delete_session(job_id: str):
+    """
+    Delete a session: removes from SQLite, hot cache, and optionally
+    cleans up the video file from disk.
+    """
+    if job_id not in jobs:
+        row = load_job(job_id)
+        if not row:
+            raise HTTPException(404, "Job not found")
+
+    # Remove video + output files from disk
+    job = jobs.get(job_id, {})
+    video_path = job.get("video_path") or ""
+    if video_path and Path(video_path).exists():
+        try:
+            Path(video_path).unlink()
+        except Exception:
+            pass
+
+    output_path = OUTPUT_DIR / f"{job_id}_edited.mp4"
+    if output_path.exists():
+        try:
+            output_path.unlink()
+        except Exception:
+            pass
+
+    # Remove audio preview if it exists
+    audio_path = UPLOAD_DIR / f"{job_id}_preview.mp3"
+    if audio_path.exists():
+        try:
+            audio_path.unlink()
+        except Exception:
+            pass
+
+    # Remove from hot cache and SQLite
+    jobs.pop(job_id, None)
+    from db import get_conn
+    with get_conn() as conn:
+        conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+        conn.commit()
+
+    return {"deleted": job_id}
 
 
 @app.post("/upload")
@@ -128,20 +198,21 @@ async def upload_video(
         shutil.copyfileobj(file.file, f)
 
     job = {
-        "status":     "uploaded",
-        "filename":   file.filename,
-        "video_path": str(video_path),
-        "transcript": None,
-        "edl":        None,
-        "error":      None,
+        "status":       "uploaded",
+        "filename":     file.filename,
+        "display_name": file.filename,
+        "video_path":   str(video_path),
+        "transcript":   None,
+        "edl":          None,
+        "error":        None,
     }
     jobs[job_id] = job
 
-    # Persist immediately so the job survives a restart even before transcription
     upsert_job(
         job_id,
         status="uploaded",
         filename=file.filename,
+        display_name=file.filename,
         video_path=str(video_path),
     )
 
@@ -152,7 +223,6 @@ async def upload_video(
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
     if job_id not in jobs:
-        # Try restoring from DB (e.g. direct URL navigation after restart)
         row = load_job(job_id)
         if row and row["video_path"] and Path(row["video_path"]).exists():
             jobs[job_id] = _job_to_mem(row)
@@ -160,9 +230,10 @@ async def get_status(job_id: str):
             raise HTTPException(404, "Job not found")
     job = jobs[job_id]
     return {
-        "status":   job["status"],
-        "filename": job["filename"],
-        "error":    job["error"],
+        "status":       job["status"],
+        "filename":     job["filename"],
+        "display_name": job.get("display_name") or job["filename"],
+        "error":        job["error"],
     }
 
 
@@ -178,8 +249,9 @@ async def get_transcript(job_id: str):
     if job["status"] != "ready" and job["status"] != "rendered":
         raise HTTPException(400, f"Not ready yet — status: {job['status']}")
     return {
-        "words": job["transcript"],
-        "edl":   job["edl"],
+        "words":        job["transcript"],
+        "edl":          job["edl"],
+        "display_name": job.get("display_name") or job["filename"],
     }
 
 
@@ -192,8 +264,9 @@ async def render_video(req: RenderRequest, background_tasks: BackgroundTasks):
         raise HTTPException(400, "Transcript not ready")
 
     jobs[req.job_id]["status"] = "rendering"
+    jobs[req.job_id]["output_filename"] = req.output_filename
     upsert_job(req.job_id, status="rendering")
-    background_tasks.add_task(run_render, req.job_id, req.operations, req.audio)
+    background_tasks.add_task(run_render, req.job_id, req.operations, req.audio, req.output_filename)
     return {"job_id": req.job_id, "status": "rendering"}
 
 
@@ -207,10 +280,17 @@ async def download_video(job_id: str):
     output_path = OUTPUT_DIR / f"{job_id}_edited.mp4"
     if not output_path.exists():
         raise HTTPException(500, "Output file missing")
+
+    # Use custom output filename if set, otherwise fall back to display_name or original
+    out_name = job.get("output_filename") or job.get("display_name") or job["filename"]
+    # Ensure .mp4 extension
+    if not out_name.lower().endswith(".mp4"):
+        out_name = Path(out_name).stem + ".mp4"
+
     return FileResponse(
         str(output_path),
         media_type="video/mp4",
-        filename=f"sequence_edited_{job['filename']}"
+        filename=out_name,
     )
 
 
@@ -258,7 +338,6 @@ async def run_transcription(job_id: str, video_path: Path):
         jobs[job_id]["edl"]        = edl
         jobs[job_id]["status"]     = "ready"
 
-        # Persist transcript + EDL to DB — survives server restart from here
         upsert_job(
             job_id,
             status="ready",
@@ -271,7 +350,7 @@ async def run_transcription(job_id: str, video_path: Path):
         upsert_job(job_id, status="error", error=str(e))
 
 
-async def run_render(job_id: str, operations: List[CutOperation], audio: AudioSettings):
+async def run_render(job_id: str, operations: List[CutOperation], audio: AudioSettings, output_filename: str = None):
     try:
         video_path  = jobs[job_id]["video_path"]
         output_path = str(OUTPUT_DIR / f"{job_id}_edited.mp4")

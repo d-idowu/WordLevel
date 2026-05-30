@@ -7,6 +7,50 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <style>
+    .export-filename-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .export-filename-group label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+    .export-filename-wrap {
+      display: flex;
+      align-items: center;
+      border: 0.5px solid var(--border-md);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      overflow: hidden;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .export-filename-wrap:focus-within {
+      border-color: var(--purple-mid);
+      box-shadow: 0 0 0 2px var(--purple-lt);
+    }
+    .export-filename-input {
+      flex: 1;
+      border: none;
+      background: none;
+      font-family: var(--font);
+      font-size: 13px;
+      color: var(--text);
+      padding: 7px 10px;
+      outline: none;
+    }
+    .export-filename-ext {
+      padding: 7px 10px 7px 0;
+      font-size: 13px;
+      font-family: var(--mono);
+      color: var(--text-3);
+      user-select: none;
+    }
+  </style>
   <!-- WaveSurfer + Regions plugin -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.4/wavesurfer.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/6.6.4/plugin/wavesurfer.regions.min.js"></script>
@@ -40,7 +84,7 @@
     </div>
   </header>
 
-  <!-- MAIN LAYOUT: left panel + transcript, then timeline below both -->
+  <!-- MAIN LAYOUT -->
   <div class="editor-body">
 
     <div class="editor-layout">
@@ -48,7 +92,6 @@
       <!-- LEFT: video preview + audio tools -->
       <aside class="left-panel">
 
-        <!-- Real video element -->
         <div class="video-preview">
           <video id="videoEl" playsinline preload="metadata"
             style="width:100%;height:100%;display:none;object-fit:contain;background:#111;">
@@ -130,10 +173,8 @@
 
     </div><!-- /.editor-layout -->
 
-    <!-- TIMELINE — spans full width below both panels -->
+    <!-- TIMELINE -->
     <div class="timeline-panel" id="timelinePanel">
-
-      <!-- Transport controls -->
       <div class="tl-controls">
         <button class="tl-btn" id="tlPlayBtn" title="Play/Pause (Space)">
           <svg width="16" height="16" viewBox="0 0 16 16" id="tlPlayIcon">
@@ -159,14 +200,9 @@
         </div>
         <span class="tl-hint">Space: play/pause · ← →: ±5s · drag waveform to draw cut · right-click cut to remove</span>
       </div>
-
-      <!-- Waveform -->
       <div class="tl-waveform-wrap">
         <div id="waveform"></div>
-        <!-- region label style injected here -->
       </div>
-
-      <!-- Legend -->
       <div class="tl-legend">
         <span class="tl-legend-item" style="--c:rgba(24,95,165,0.5)">silence cut</span>
         <span class="tl-legend-item" style="--c:rgba(186,117,23,0.5)">filler cut</span>
@@ -175,46 +211,63 @@
         <span class="tl-legend-item" style="--c:rgba(100,100,95,0.5)">mute</span>
         <span class="tl-legend-item" style="--c:rgba(30,30,30,0.25);border:1px dashed rgba(30,30,30,0.4)">free cut</span>
       </div>
-
-    </div><!-- /.timeline-panel -->
+    </div>
 
   </div><!-- /.editor-body -->
 
   <!-- CONTEXT MENU -->
-  <div class="ctx-menu" id="ctxMenu">
-    <div class="ctx-item" data-action="cut">
+  <div class="ctx-menu" id="ctxMenu" role="menu" aria-label="Word actions">
+    <div class="ctx-item" data-action="cut" role="menuitem">
       <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2l10 10M3 9a2 2 0 100-4 2 2 0 000 4zM11 5a2 2 0 100-4 2 2 0 000 4z" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
       Cut this word
     </div>
-    <div class="ctx-item" data-action="bleep">
+    <div class="ctx-item" data-action="bleep" role="menuitem">
       <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M5 4v6M9 3v8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
       Bleep
     </div>
-    <div class="ctx-item" data-action="mute">
+    <div class="ctx-item" data-action="mute" role="menuitem">
       <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 5h4l4-3v12l-4-3H2V5z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M11 5.5a3 3 0 010 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/><path d="M2 2l10 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
       Mute (silence)
     </div>
-    <div class="ctx-item" data-action="cut-all-similar">
+    <div class="ctx-item" data-action="cut-all-similar" role="menuitem">
       <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 4h10M2 7h7M2 10h9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
       Cut all "<span id="ctxWordLabel"></span>"
     </div>
-    <div class="ctx-divider"></div>
-    <div class="ctx-item" data-action="restore">
+    <div class="ctx-divider" role="separator"></div>
+    <div class="ctx-item" data-action="restore" role="menuitem">
       <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7a5 5 0 119 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/><path d="M2 4v3h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/></svg>
       Restore
     </div>
   </div>
 
   <!-- EXPORT PANEL -->
-  <div class="export-overlay" id="exportOverlay" style="display:none">
+  <div class="export-overlay" id="exportOverlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
     <div class="export-panel">
       <div class="export-header">
-        <h2>Export video</h2>
-        <button class="btn-icon" onclick="closeExportPanel()">
+        <h2 id="exportTitle">Export video</h2>
+        <button class="btn-icon" onclick="closeExportPanel()" aria-label="Close export panel">
           <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
       </div>
+
       <div class="export-summary" id="exportSummary"></div>
+
+      <!-- Filename -->
+      <div class="export-filename-group">
+        <label for="exportFilenameInput">Output filename</label>
+        <div class="export-filename-wrap">
+          <input
+            type="text"
+            id="exportFilenameInput"
+            class="export-filename-input"
+            placeholder="my-video"
+            aria-label="Output filename without extension"
+            spellcheck="false"
+          >
+          <span class="export-filename-ext" aria-hidden="true">.mp4</span>
+        </div>
+      </div>
+
       <div class="export-format">
         <div class="section-label">Format</div>
         <div class="format-options">
@@ -222,6 +275,7 @@
           <label class="format-opt"><input type="radio" name="fmt" value="mov"> MOV <small>ProRes, editing quality</small></label>
         </div>
       </div>
+
       <button class="btn btn-primary btn-full" id="renderBtn" onclick="startRender()">
         Render &amp; download
       </button>

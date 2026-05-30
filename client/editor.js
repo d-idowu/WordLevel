@@ -14,6 +14,7 @@ const LS_KEY = JOB_ID ? `seq_ops_${JOB_ID}` : null;
 
 let state = {
   words: [],
+  displayName: '',
   operations: [],
   activeFilter: 'all',
   searchQuery: '',
@@ -80,8 +81,9 @@ async function loadTranscript() {
     saveHistory();
 
     const srcVideo = data.edl?.source_video ?? '';
-    document.getElementById('topbarFilename').textContent =
-      srcVideo ? srcVideo.split(/[\\/]/).pop() : 'video';
+    const displayName = data.display_name || (srcVideo ? srcVideo.split(/[\\/]/).pop() : 'video');
+    document.getElementById('topbarFilename').textContent = displayName;
+    state.displayName = displayName.replace(/\.[^.]+$/, '');
 
     renderTranscript();
     updateStats();
@@ -334,8 +336,9 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y — redo
-    if ((isCtrl && e.shiftKey && e.key === 'z') || (isCtrl && e.key === 'y')) {
+    // FIX: use e.key.toLowerCase() === 'z' so Ctrl+Shift+Z works on all browsers
+    // (browsers fire e.key = 'Z' uppercase when Shift is held)
+    if ((isCtrl && e.shiftKey && e.key.toLowerCase() === 'z') || (isCtrl && e.key === 'y')) {
       e.preventDefault();
       redo();
       return;
@@ -397,7 +400,9 @@ function showShortcutToast(msg) {
 
 function addOperation(op) {
   saveHistory();
-  const id = Math.max(0, ...state.operations.map(o => o.id)) + 1;
+  // FIX: filter out non-finite ids before Math.max to prevent NaN propagation
+  // which would corrupt localStorage saves (JSON.stringify turns NaN → null)
+  const id = Math.max(0, ...state.operations.map(o => o.id).filter(Number.isFinite)) + 1;
   state.operations.push({ id, enabled: true, ...op });
   persistOps();
   renderTranscript();
@@ -420,7 +425,8 @@ function cutAllSimilar(word) {
   saveHistory();
   state.words.forEach(w => {
     if (w.word.toLowerCase() === word.toLowerCase()) {
-      const id = Math.max(0, ...state.operations.map(o => o.id)) + 1;
+      // FIX: same safe id generation here
+      const id = Math.max(0, ...state.operations.map(o => o.id).filter(Number.isFinite)) + 1;
       state.operations.push({ id, enabled: true, type: 'cut_manual', start: w.start, end: w.end });
     }
   });
@@ -452,6 +458,8 @@ function autoClean() {
   persistOps();
   renderTranscript();
   updateStats();
+  // FIX: was missing — waveform regions weren't refreshed after auto-clean
+  timeline.refresh(state.operations);
 }
 
 function undoAll() {
@@ -544,6 +552,8 @@ function setupFillerTags() {
       state.words.forEach(w => {
         w.is_filler = activeFillers.includes(w.word.toLowerCase().trim('.,!?'));
       });
+      // FIX: was missing — filler tag changes were never saved to localStorage
+      persistOps();
       renderTranscript();
       updateStats();
     });
@@ -584,7 +594,17 @@ function openExportPanel() {
   document.getElementById('exportSummary').innerHTML =
     `<p><strong>${enabled.length}</strong> edits will be applied — removing <strong>${cutSec.toFixed(1)}s</strong> of footage.</p>`;
 
+  // Pre-fill filename from display_name (strip extension)
+  const filenameInput = document.getElementById('exportFilenameInput');
+  if (filenameInput && !filenameInput.dataset.userEdited) {
+    filenameInput.value = state.displayName || 'edited';
+  }
+
   document.getElementById('exportOverlay').style.display = 'flex';
+  // Once the user manually edits the field, stop auto-filling it
+  if (filenameInput) {
+    filenameInput.addEventListener('input', () => { filenameInput.dataset.userEdited = '1'; }, { once: true });
+  }
   document.getElementById('renderProgress').style.display = 'none';
   document.getElementById('renderBtn').style.display = 'block';
 }
@@ -599,9 +619,13 @@ async function startRender() {
   setRenderStatus('Sending to server...');
   setRenderProgress(10);
 
+  const filenameRaw = (document.getElementById('exportFilenameInput')?.value || '').trim();
+  const outputFilename = filenameRaw ? filenameRaw + '.mp4' : null;
+
   const payload = {
     job_id: JOB_ID,
     operations: [...state.operations, ...timeline.getFreeCuts()],
+    output_filename: outputFilename,
     audio: {
       noise_gate:  document.getElementById('opt-noise').checked,
       compressor:  document.getElementById('opt-comp').checked,

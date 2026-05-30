@@ -7,6 +7,229 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <style>
+    /* ── SESSIONS PANEL ─────────────────────────────────────────── */
+    .sessions-section {
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    .sessions-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .sessions-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+
+    .sessions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .session-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--bg-2);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.12s, box-shadow 0.12s;
+      position: relative;
+    }
+
+    .session-card:hover {
+      border-color: var(--border-md);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    .session-icon {
+      width: 34px;
+      height: 34px;
+      background: var(--purple-lt);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--purple);
+    }
+
+    .session-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* Inline rename: the name toggles between a <span> and an <input> */
+    .session-name-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+
+    .session-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: text;
+      border-radius: 3px;
+      padding: 1px 3px;
+      margin: -1px -3px;
+      transition: background 0.1s;
+    }
+    .session-name:hover {
+      background: var(--bg);
+    }
+
+    .session-name-input {
+      font-size: 13px;
+      font-weight: 500;
+      font-family: var(--font);
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--purple-mid);
+      border-radius: 4px;
+      padding: 1px 6px;
+      outline: none;
+      width: 100%;
+      box-shadow: 0 0 0 2px var(--purple-lt);
+    }
+
+    .rename-icon {
+      opacity: 0;
+      transition: opacity 0.1s;
+      flex-shrink: 0;
+      color: var(--text-3);
+      cursor: pointer;
+      padding: 2px;
+      border-radius: 3px;
+    }
+    .rename-icon:hover { color: var(--text-2); background: var(--bg); }
+    .session-card:hover .rename-icon { opacity: 1; }
+
+    .session-meta {
+      font-size: 11px;
+      color: var(--text-3);
+      font-family: var(--mono);
+    }
+
+    .session-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .btn-resume {
+      padding: 5px 14px;
+      background: var(--purple);
+      color: white;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: background 0.12s;
+    }
+    .btn-resume:hover { background: #3C3489; }
+
+    .btn-delete-session {
+      width: 28px;
+      height: 28px;
+      border: 0.5px solid var(--border-md);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--text-3);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s;
+      flex-shrink: 0;
+    }
+    .btn-delete-session:hover {
+      background: var(--red-lt);
+      border-color: #F7C1C1;
+      color: var(--red);
+    }
+
+    .session-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--text-3);
+    }
+    .session-status-dot.rendered { background: var(--teal); }
+    .session-status-dot.ready    { background: var(--purple); }
+
+    /* Confirm-delete state */
+    .session-card.confirming {
+      border-color: #F7C1C1;
+      background: var(--red-lt);
+    }
+    .confirm-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .confirm-actions span { color: var(--red); font-weight: 500; }
+    .btn-confirm-delete {
+      padding: 4px 10px;
+      background: var(--red);
+      color: white;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-cancel-delete {
+      padding: 4px 10px;
+      background: var(--bg-2);
+      color: var(--text-2);
+      border: 0.5px solid var(--border-md);
+      border-radius: var(--radius-sm);
+      font-family: var(--font);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .sessions-empty {
+      font-size: 13px;
+      color: var(--text-3);
+      text-align: center;
+      padding: 16px 0 4px;
+    }
+
+    .sessions-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-3);
+      padding: 8px 0;
+    }
+  </style>
 </head>
 <body class="upload-page">
 
@@ -24,7 +247,7 @@
   <main class="upload-main">
     <div class="upload-hero">
       <h1>Drop in your video.<br>We'll clean it up.</h1>
-      <p class="subtitle"> We find all the filler words, silent moments, andclutter.<br>You decide what stays.</p>
+      <p class="subtitle">We find all the filler words, silent moments, and clutter.<br>You decide what stays.</p>
     </div>
 
     <div class="drop-zone" id="dropZone">
@@ -58,20 +281,46 @@
 
     <!-- Feature pills -->
     <div class="feature-pills">
-      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l1.5 4H13l-3.5 2.5 1.5 4L7 9l-4 2.5 1.5-4L1 5h4.5z" fill="#534AB7"/></svg> Filler word detection</span>
-      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M7 2v10" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg> Silence removal</span>
-      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L7 3l4 8" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg> Audio normalization</span>
-      <span class="pill"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" stroke="#534AB7" stroke-width="1.5" fill="none"/><path d="M5.5 5.5L8.5 8.5M8.5 5.5L5.5 8.5" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round"/></svg> Bleep / censor</span>
+      <span class="pill">
+        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l1.5 4H13l-3.5 2.5 1.5 4L7 9l-4 2.5 1.5-4L1 5h4.5z" fill="#534AB7"/></svg>
+        Filler word detection
+      </span>
+      <span class="pill">
+        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 7h10M7 2v10" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
+        Silence removal
+      </span>
+      <span class="pill">
+        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L7 3l4 8" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
+        Audio normalization
+      </span>
+      <span class="pill">
+        <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" stroke="#534AB7" stroke-width="1.5" fill="none"/><path d="M5.5 5.5L8.5 8.5M8.5 5.5L5.5 8.5" stroke="#534AB7" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Bleep / censor
+      </span>
     </div>
+
+    <!-- Recent sessions -->
+    <div class="sessions-section" id="sessionsSection" style="display:none">
+      <div class="sessions-header">
+        <span class="sessions-label">Recent sessions</span>
+      </div>
+      <div class="sessions-list" id="sessionsList">
+        <div class="sessions-loading">
+          <div class="spinner"></div>
+          Loading sessions...
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <script>
     const API = 'http://localhost:8000';
-    const dropZone = document.getElementById('dropZone');
-    const fileInput = document.getElementById('fileInput');
+    const dropZone   = document.getElementById('dropZone');
+    const fileInput  = document.getElementById('fileInput');
     const uploadProgress = document.getElementById('uploadProgress');
 
-    // Drag and drop
+    // ── DRAG & DROP ──────────────────────────────────────────────────────────
     dropZone.addEventListener('dragover', e => {
       e.preventDefault();
       dropZone.classList.add('drag-over');
@@ -83,15 +332,16 @@
       const file = e.dataTransfer.files[0];
       if (file) handleFile(file);
     });
-
     fileInput.addEventListener('change', () => {
       if (fileInput.files[0]) handleFile(fileInput.files[0]);
     });
 
+    // ── UPLOAD ───────────────────────────────────────────────────────────────
     async function handleFile(file) {
       document.getElementById('progressFilename').textContent = file.name;
       dropZone.style.display = 'none';
       uploadProgress.style.display = 'flex';
+      document.getElementById('sessionsSection').style.display = 'none';
       setStatus('Uploading...');
       setProgress(10);
 
@@ -111,17 +361,14 @@
 
       setProgress(30);
       setStatus('Transcribing with AI...');
-
-      // Poll status
       await pollUntilReady(jobId);
     }
 
     async function pollUntilReady(jobId) {
       const interval = setInterval(async () => {
         try {
-          const res = await fetch(`${API}/status/${jobId}`);
+          const res  = await fetch(`${API}/status/${jobId}`);
           const data = await res.json();
-
           if (data.status === 'transcribing') {
             setProgress(50 + Math.random() * 20);
             setStatus('Transcribing with AI...');
@@ -129,16 +376,12 @@
             clearInterval(interval);
             setProgress(100);
             setStatus('Done! Loading editor...');
-            setTimeout(() => {
-              window.location.href = `editor.html?job=${jobId}`;
-            }, 600);
+            setTimeout(() => { window.location.href = `editor.html?job=${jobId}`; }, 600);
           } else if (data.status === 'error') {
             clearInterval(interval);
             setStatus(`Error: ${data.error}`);
           }
-        } catch (e) {
-          // keep polling
-        }
+        } catch (e) { /* keep polling */ }
       }, 1500);
     }
 
@@ -148,6 +391,210 @@
     function setStatus(msg) {
       document.getElementById('progressStatus').textContent = msg;
     }
+
+    // ── SESSIONS ─────────────────────────────────────────────────────────────
+    async function loadSessions() {
+      try {
+        const res  = await fetch(`${API}/sessions`);
+        const data = await res.json();
+        renderSessions(data.sessions ?? []);
+      } catch (e) {
+        // server offline — hide the section silently
+        document.getElementById('sessionsSection').style.display = 'none';
+      }
+    }
+
+    function renderSessions(sessions) {
+      const section = document.getElementById('sessionsSection');
+      const list    = document.getElementById('sessionsList');
+
+      if (!sessions.length) {
+        section.style.display = 'none';
+        return;
+      }
+
+      section.style.display = 'block';
+      list.innerHTML = sessions.map(s => sessionCardHTML(s)).join('');
+      attachSessionEvents();
+    }
+
+    function sessionCardHTML(s) {
+      const date = formatRelativeTime(s.updated_at);
+      const dotCls = s.status === 'rendered' ? 'rendered' : 'ready';
+      const dotTitle = s.status === 'rendered' ? 'Exported' : 'Ready to edit';
+      return `
+        <div class="session-card" data-job-id="${s.job_id}" data-display-name="${escAttr(s.display_name)}">
+          <div class="session-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="1" width="12" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M5 5h6M5 8h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="session-info">
+            <div class="session-name-wrap">
+              <div
+                class="session-name"
+                role="button"
+                tabindex="0"
+                aria-label="Rename session: ${escAttr(s.display_name)}"
+                title="Click to rename"
+              >${escHtml(s.display_name)}</div>
+              <svg class="rename-icon" aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M8.5 1.5l2 2-6 6H2.5v-2l6-6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="session-meta">
+              <span class="session-status-dot ${dotCls}" title="${dotTitle}"></span>
+              &nbsp;${date}
+            </div>
+          </div>
+          <div class="session-actions">
+            <a
+              href="editor.html?job=${s.job_id}"
+              class="btn-resume"
+              aria-label="Resume editing ${escAttr(s.display_name)}"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 2l7 4-7 4V2z" fill="currentColor"/>
+              </svg>
+              Resume
+            </a>
+            <button
+              class="btn-delete-session"
+              aria-label="Delete session ${escAttr(s.display_name)}"
+              title="Delete session"
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                <path d="M2 3.5h9M5 3.5V2.5h3v1M5.5 6v4M7.5 6v4M3 3.5l.5 7h6l.5-7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>`;
+    }
+
+    function attachSessionEvents() {
+      // Resume on card click (not on buttons/inputs)
+      document.querySelectorAll('.session-card').forEach(card => {
+        const jobId = card.dataset.jobId;
+
+        // Inline rename: click name span
+        const nameEl  = card.querySelector('.session-name');
+        const renameIcon = card.querySelector('.rename-icon');
+
+        function startRename() {
+          const current = card.dataset.displayName;
+          const wrap = nameEl.parentElement;
+
+          nameEl.style.display  = 'none';
+          renameIcon.style.display = 'none';
+
+          const input = document.createElement('input');
+          input.type  = 'text';
+          input.value = current;
+          input.className = 'session-name-input';
+          input.setAttribute('aria-label', 'Session name');
+          wrap.insertBefore(input, nameEl);
+          input.focus();
+          input.select();
+
+          async function commitRename() {
+            const newName = input.value.trim() || current;
+            input.remove();
+            nameEl.style.display  = '';
+            renameIcon.style.display = '';
+            nameEl.textContent = newName;
+            card.dataset.displayName = newName;
+            card.setAttribute('data-display-name', newName);
+
+            // Persist to server
+            try {
+              await fetch(`${API}/sessions/${jobId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ display_name: newName }),
+              });
+            } catch (e) {
+              console.warn('Rename failed:', e);
+            }
+          }
+
+          input.addEventListener('blur', commitRename);
+          input.addEventListener('keydown', e => {
+            if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+            if (e.key === 'Escape') { input.value = current; input.blur(); }
+          });
+        }
+
+        nameEl.addEventListener('click', e => { e.stopPropagation(); startRename(); });
+        nameEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startRename(); } });
+        renameIcon.addEventListener('click', e => { e.stopPropagation(); startRename(); });
+
+        // Delete with confirm step
+        const deleteBtn = card.querySelector('.btn-delete-session');
+        deleteBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          e.preventDefault();
+
+          if (card.classList.contains('confirming')) return;
+          card.classList.add('confirming');
+
+          const actions = card.querySelector('.session-actions');
+          const original = actions.innerHTML;
+          actions.innerHTML = `
+            <div class="confirm-actions" role="group" aria-label="Confirm delete">
+              <span>Delete?</span>
+              <button class="btn-confirm-delete" aria-label="Confirm delete session">Yes</button>
+              <button class="btn-cancel-delete" aria-label="Cancel delete">Cancel</button>
+            </div>`;
+
+          actions.querySelector('.btn-confirm-delete').addEventListener('click', async () => {
+            card.style.opacity = '0.5';
+            card.style.pointerEvents = 'none';
+            try {
+              await fetch(`${API}/sessions/${jobId}`, { method: 'DELETE' });
+            } catch (e) { console.warn('Delete failed:', e); }
+            card.remove();
+            // Hide section if no sessions left
+            if (!document.querySelectorAll('.session-card').length) {
+              document.getElementById('sessionsSection').style.display = 'none';
+            }
+          });
+
+          actions.querySelector('.btn-cancel-delete').addEventListener('click', () => {
+            card.classList.remove('confirming');
+            actions.innerHTML = original;
+            attachSessionEvents(); // re-bind the new delete button
+          });
+        });
+      });
+    }
+
+    // ── UTILS ─────────────────────────────────────────────────────────────────
+    function formatRelativeTime(isoOrSqlite) {
+      if (!isoOrSqlite) return '';
+      // SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" in UTC
+      // Convert to ISO so Date can parse it correctly
+      const iso = isoOrSqlite.replace(' ', 'T') + (isoOrSqlite.includes('T') ? '' : 'Z');
+      const diff = Date.now() - new Date(iso).getTime();
+      const m  = Math.floor(diff / 60000);
+      const h  = Math.floor(m  / 60);
+      const d  = Math.floor(h  / 24);
+      if (m  < 1)  return 'just now';
+      if (m  < 60) return `${m}m ago`;
+      if (h  < 24) return `${h}h ago`;
+      if (d  < 7)  return `${d}d ago`;
+      return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function escAttr(s) {
+      return String(s).replace(/"/g,'&quot;');
+    }
+
+    // Load sessions on page load
+    loadSessions();
   </script>
 </body>
 </html>
