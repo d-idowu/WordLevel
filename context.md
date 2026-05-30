@@ -131,9 +131,22 @@ state = {
 ## Keyboard shortcuts (editor.js)
 - `Delete` / `Backspace`          cut the word currently under the playhead
 - `Cmd+Z` / `Ctrl+Z`              undo (pops history stack)
-- `Cmd+Shift+Z` / `Ctrl+Y`        redo — FIXED: uses `e.key.toLowerCase()` so Shift+Z works cross-browser
+- `Cmd+Shift+Z` / `Ctrl+Y`        redo — uses `e.key.toLowerCase()` so Shift+Z works cross-browser
 - `Space`                         play / pause (timeline.js)
 - `← →`                           seek ±5s (timeline.js)
+
+## Undo / Redo buttons (editor.html + editor.js)
+- Two buttons added to topbar between the stats strip and "Revert all":
+  - **Undo** (← arrow icon) — `onclick="undo()"`, `id="undoBtn"`
+  - **Redo** (→ arrow icon) — `onclick="redo()"`, `id="redoBtn"`
+- Both start `disabled`; `updateUndoRedoBtns()` called after every state mutation
+  to enable/disable based on `state.history.length` / `state.future.length`
+- `window.undo` and `window.redo` explicitly exported so `onclick` attributes resolve
+- `.btn:disabled { opacity: 0.38; cursor: not-allowed; pointer-events: none; }` added to style.css
+
+## Loudnorm LUFS buttons greyed out when toggle is off (editor.js)
+- On DOMContentLoaded, `opt-loud` checkbox change event syncs opacity + pointer-events
+  of `#lufsOptions` — greyed when unchecked, full opacity when checked
 
 ## Word token behaviour
 **Left click** on word → seeks video/waveform to that word's timestamp
@@ -147,15 +160,29 @@ state = {
 - `restore`          remove all ops overlapping this word's timestamps
 
 ## Timeline (timeline.js) — WaveSurfer 6.6.4 + Regions plugin
-- WaveSurfer volume=0 always (waveform display only, video el handles all audio)
-- Sync: video timeupdate → ws.seekTo via wsSeeking flag to suppress feedback loop
-- userSeeking flag (mousedown on waveform) allows human scrub → video seek
-- Op regions: resize=true, drag=false — drag edges to adjust cut timing
-- Free-draw: dragSelection enabled — drag empty area to create free_cut region
+### Smooth cursor architecture
+The cursor is driven by `requestAnimationFrame` at 60fps, NOT by `timeupdate`.
+
+- `timeupdate` (~4Hz) only re-anchors two variables: `anchorVideoTime` and `anchorWallTime`
+- RAF loop interpolates forward: `interpolated = anchorVideoTime + (performance.now() - anchorWallTime) / 1000 * playbackRate`
+- `setCursorTo(t)` calls `ws.seekTo()` with `programmaticSeek = true` to block the feedback loop
+- On `play`: RAF starts, anchor set from `videoEl.currentTime`
+- On `pause` / `seeked`: RAF stops, cursor snapped to exact position via `setCursorTo()`
+- On speed change (`setSpeed`): anchor re-set so interpolation uses new rate immediately
+
+### Other timeline behaviour
+- WaveSurfer backend: `MediaElement` (not WebAudio) — no independent audio engine
+- Volume always 0 — video element handles all audio
+- `ws.play()` never called — cursor driven entirely by RAF
+- `programmaticSeek` flag set true before every `ws.seekTo()` call we make,
+  false immediately after — blocks the `seek` event handler from bouncing `videoEl.currentTime`
+- `userSeeking` flag set on waveform mousedown (400ms window) — allows human scrub → video seek
+- Op regions: `resize=true`, `drag=false` — drag edges to adjust cut timing
+- Free-draw: `dragSelection` enabled — drag empty area to create `free_cut` region
   - Right-click free-cut region to delete it
   - Free cuts included in render payload merged with word ops
   - Words overlapping free-cut zone get `.in-free-cut` tint (informational only)
-- Speed buttons: 0.5× 0.75× 1× 1.5× 2× → sets videoEl.playbackRate
+- Speed buttons: 0.5× 0.75× 1× 1.5× 2× → sets `videoEl.playbackRate` + re-anchors interpolation
 
 ## CSS design tokens
 ```
@@ -177,33 +204,42 @@ state = {
 - `.word.playing`     purple solid — currently playing in preview
 - `.word.in-free-cut` faint red tint — falls within a free-draw cut zone (informational)
 
-## Known Bugs
-- Timeline not fully synced to video — cursor races ahead if video is buffering, then jumps back
-- Timeline glitches when jumping around during playback (same root cause as above)
+## Known bugs
 - Go-to-start button doesn't work (ws.seekTo(0) WaveSurfer 6 no-op bug)
+- Timeline cursor slightly leads real position during buffering stalls (interpolation
+  runs ahead of actual decode). Corrects automatically on next timeupdate tick.
 
-## Fixed bugs (this session)
-- **Redo shortcut broken**: `e.key === 'z'` failed when Shift held (browsers fire 'Z') → fixed with `.toLowerCase()`
-- **Save not persisting filler tag toggles**: `persistOps()` was missing from `setupFillerTags` click handler
-- **Op id NaN corruption**: `Math.max(...ids)` with any NaN id propagated NaN to new ops, breaking localStorage round-trip → fixed with `.filter(Number.isFinite)`
+## Fixed bugs (all sessions)
+- **Cursor jumping every ~250ms**: timeupdate-driven ws.seekTo() caused visible hops.
+  Fixed with RAF interpolation loop — cursor now moves at 60fps between timeupdate anchors.
+- **Feedback loop / cursor snapping back**: ws.seekTo() fired WaveSurfer 'seek' event
+  which reset videoEl.currentTime. Fixed with `programmaticSeek` flag.
+- **No sound during playback**: WebAudio backend ran independent audio engine fighting
+  the video element. Fixed by switching to MediaElement backend + removing ws.play() calls.
+- **Redo shortcut broken**: `e.key === 'z'` failed when Shift held (browsers fire 'Z') → `.toLowerCase()`
+- **Undo/Redo buttons missing**: added to topbar with disabled state management via `updateUndoRedoBtns()`
+- **window.undo/redo not exported**: `onclick` attributes in HTML silently failed → added `window.undo = undo` etc.
+- **LUFS buttons not greyed when loudnorm off**: added toggle listener on DOMContentLoaded
+- **Save not persisting filler tag toggles**: `persistOps()` was missing from `setupFillerTags`
+- **Op id NaN corruption**: `Math.max(...ids)` with NaN → fixed with `.filter(Number.isFinite)`
 - **Auto-clean didn't update waveform**: `timeline.refresh()` was missing from `autoClean()`
-- **Sessions panel missing from index.html**: panel existed in server but frontend never fetched/rendered it — rebuilt
-- **No way to rename sessions**: added inline rename on session cards → PATCHes SQLite
-- **No way to delete sessions**: added two-step confirm delete → DELETEs from SQLite + disk
-- **Export filename not customisable**: added filename input to export panel, pre-filled from display_name
-- **display_name column missing from DB**: added column + ALTER TABLE migration for existing DBs
+- **Sessions panel missing from index.html**: rebuilt fetch + render
+- **No way to rename sessions**: inline rename on cards → PATCHes SQLite
+- **No way to delete sessions**: two-step confirm delete → DELETEs SQLite + disk
+- **Export filename not customisable**: filename input in export panel, pre-filled from display_name
+- **display_name column missing from DB**: ALTER TABLE migration on startup
 
 ## Backlog (priority order)
-1. AI-contextual filler detection (send transcript to Claude, get per-word confidence)
+1. AI-contextual filler detection (send transcript to Claude, get per-word filler confidence)
 2. "Bleep all / Mute all similar" in context menu
 3. Threshold slider for silence detection (re-runs EDL with new min_silence value)
 4. Dual-mode timeline: switch between Original and Edited preview
-5. Add icons to represent fillers, silences, free cuts and bleeps
+5. Add icons to represent fillers, silences, free cuts and bleeps in the waveform legend
 6. Audio processing stats display (LUFS before/after via ffmpeg ebur128)
 7. Export EDL / Premiere XML
 8. "Tighten cuts" — compress silence to 0.2s instead of removing entirely
 9. Batch processing multiple videos
-10. LUFS preset buttons grey out when loudness normalize toggle is off
+10. Fix go-to-start button (ws.seekTo(0) no-op in WaveSurfer 6)
 
 ## How to start a new session efficiently
 1. Upload latest .rar of the project

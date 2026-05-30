@@ -1,6 +1,11 @@
 /**
  * editor.js — Sequence Auto Editor
  * Manages transcript display, cut list state, and render/export.
+ *
+ * CHANGES:
+ *  - undo() / redo() now update #undoBtn / #redoBtn disabled state
+ *  - window.undo and window.redo exported so HTML onclick attributes work
+ *  - updateUndoRedoBtns() called after every state-mutating operation
  */
 
 const API = 'http://localhost:8000';
@@ -39,6 +44,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupLufsButtons();
   setupFillerTags();
   setupKeyboardShortcuts();
+
+  // Wire up loudnorm toggle to grey out LUFS buttons when off
+  const loudToggle = document.getElementById('opt-loud');
+  const lufsOptions = document.getElementById('lufsOptions');
+  if (loudToggle && lufsOptions) {
+    const syncLufs = () => {
+      lufsOptions.style.opacity       = loudToggle.checked ? '1' : '0.35';
+      lufsOptions.style.pointerEvents = loudToggle.checked ? '' : 'none';
+    };
+    loudToggle.addEventListener('change', syncLufs);
+    syncLufs();
+  }
 
   await loadTranscript();
 });
@@ -87,6 +104,7 @@ async function loadTranscript() {
 
     renderTranscript();
     updateStats();
+    updateUndoRedoBtns();
     initMediaAndTimeline();
   } catch (err) {
     console.error('loadTranscript error:', err);
@@ -122,7 +140,6 @@ function showRestoreBanner() {
 window.discardRestored = function() {
   if (LS_KEY) localStorage.removeItem(LS_KEY);
   document.getElementById('restoreBanner')?.remove();
-  // Reload from server EDL
   location.reload();
 };
 
@@ -145,6 +162,16 @@ function persistOps() {
   } catch (e) {
     console.warn('localStorage save failed:', e);
   }
+}
+
+
+// ── UNDO / REDO BUTTON STATE ─────────────────────────────────────────────────
+
+function updateUndoRedoBtns() {
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  if (undoBtn) undoBtn.disabled = state.history.length === 0;
+  if (redoBtn) redoBtn.disabled = state.future.length  === 0;
 }
 
 
@@ -248,7 +275,7 @@ function groupIntoBlocks(words, operations) {
       );
       if (gap >= 0.5 || silOp) {
         blocks.push(currentBlock);
-        if (silOp)       blocks.push({ type: 'silence', operation: silOp });
+        if (silOp)           blocks.push({ type: 'silence', operation: silOp });
         else if (gap >= 1.0) blocks.push({ type: 'silence', operation: { duration: gap, enabled: false, id: null } });
         currentBlock = { type: 'words', words: [] };
       }
@@ -257,12 +284,6 @@ function groupIntoBlocks(words, operations) {
 
   if (currentBlock.words.length) blocks.push(currentBlock);
   return blocks;
-}
-
-function buildOpLookup(operations) {
-  const map = {};
-  for (const op of operations) map[`${op.start}-${op.end}`] = op;
-  return map;
 }
 
 
@@ -323,7 +344,6 @@ function setupContextMenu() {
 
 function setupKeyboardShortcuts() {
   document.addEventListener('keydown', e => {
-    // Don't fire when typing in an input
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     const isMac  = navigator.platform.toUpperCase().includes('MAC');
@@ -336,8 +356,8 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // FIX: use e.key.toLowerCase() === 'z' so Ctrl+Shift+Z works on all browsers
-    // (browsers fire e.key = 'Z' uppercase when Shift is held)
+    // Cmd/Ctrl+Shift+Z  OR  Ctrl+Y — redo
+    // e.key.toLowerCase() handles browsers firing 'Z' (uppercase) when Shift held
     if ((isCtrl && e.shiftKey && e.key.toLowerCase() === 'z') || (isCtrl && e.key === 'y')) {
       e.preventDefault();
       redo();
@@ -358,11 +378,9 @@ function cutWordAtPlayhead() {
   if (!videoEl) return;
   const t = videoEl.currentTime;
 
-  // Find the word the playhead is currently inside
   const word = state.words.find(w => t >= w.start && t <= w.end);
   if (!word) return;
 
-  // Don't double-cut
   const alreadyCut = state.operations.some(op =>
     op.enabled &&
     op.type !== 'bleep' &&
@@ -400,13 +418,12 @@ function showShortcutToast(msg) {
 
 function addOperation(op) {
   saveHistory();
-  // FIX: filter out non-finite ids before Math.max to prevent NaN propagation
-  // which would corrupt localStorage saves (JSON.stringify turns NaN → null)
   const id = Math.max(0, ...state.operations.map(o => o.id).filter(Number.isFinite)) + 1;
   state.operations.push({ id, enabled: true, ...op });
   persistOps();
   renderTranscript();
   updateStats();
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
 }
 
@@ -418,6 +435,7 @@ function removeOperationsAt(start, end) {
   persistOps();
   renderTranscript();
   updateStats();
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
 }
 
@@ -425,7 +443,6 @@ function cutAllSimilar(word) {
   saveHistory();
   state.words.forEach(w => {
     if (w.word.toLowerCase() === word.toLowerCase()) {
-      // FIX: same safe id generation here
       const id = Math.max(0, ...state.operations.map(o => o.id).filter(Number.isFinite)) + 1;
       state.operations.push({ id, enabled: true, type: 'cut_manual', start: w.start, end: w.end });
     }
@@ -433,6 +450,7 @@ function cutAllSimilar(word) {
   persistOps();
   renderTranscript();
   updateStats();
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
 }
 
@@ -446,6 +464,7 @@ function toggleSilence(el) {
   persistOps();
   renderTranscript();
   updateStats();
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
 }
 window.toggleSilence = toggleSilence;
@@ -458,7 +477,7 @@ function autoClean() {
   persistOps();
   renderTranscript();
   updateStats();
-  // FIX: was missing — waveform regions weren't refreshed after auto-clean
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
 }
 
@@ -470,6 +489,7 @@ function undoAll() {
     persistOps();
     renderTranscript();
     updateStats();
+    updateUndoRedoBtns();
     timeline.refresh(state.operations);
   }
 }
@@ -487,6 +507,7 @@ function undo() {
   persistOps();
   renderTranscript();
   updateStats();
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
   showShortcutToast('Undo');
 }
@@ -498,12 +519,15 @@ function redo() {
   persistOps();
   renderTranscript();
   updateStats();
+  updateUndoRedoBtns();
   timeline.refresh(state.operations);
   showShortcutToast('Redo');
 }
 
 window.autoClean = autoClean;
 window.undoAll   = undoAll;
+window.undo      = undo;
+window.redo      = redo;
 
 
 // ── FILTER TABS ───────────────────────────────────────────────────────────────
@@ -552,10 +576,10 @@ function setupFillerTags() {
       state.words.forEach(w => {
         w.is_filler = activeFillers.includes(w.word.toLowerCase().trim('.,!?'));
       });
-      // FIX: was missing — filler tag changes were never saved to localStorage
       persistOps();
       renderTranscript();
       updateStats();
+      updateUndoRedoBtns();
     });
   });
 }
@@ -594,14 +618,12 @@ function openExportPanel() {
   document.getElementById('exportSummary').innerHTML =
     `<p><strong>${enabled.length}</strong> edits will be applied — removing <strong>${cutSec.toFixed(1)}s</strong> of footage.</p>`;
 
-  // Pre-fill filename from display_name (strip extension)
   const filenameInput = document.getElementById('exportFilenameInput');
   if (filenameInput && !filenameInput.dataset.userEdited) {
     filenameInput.value = state.displayName || 'edited';
   }
 
   document.getElementById('exportOverlay').style.display = 'flex';
-  // Once the user manually edits the field, stop auto-filling it
   if (filenameInput) {
     filenameInput.addEventListener('input', () => { filenameInput.dataset.userEdited = '1'; }, { once: true });
   }

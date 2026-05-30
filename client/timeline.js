@@ -1,16 +1,38 @@
 /**
  * timeline.js — Sequence Auto Editor
+ *
+ * FIX (cursor jumping): timeupdate fires ~4Hz, so ws.seekTo() was called
+ *   in 250ms jumps. Fix: drive the cursor from requestAnimationFrame at 60fps
+ *   using performance.now() interpolation between timeupdate anchors.
+ *   timeupdate still runs but only re-anchors the known position — RAF
+ *   does all the smooth in-between movement.
+ *
+ * FIX (feedback loop): programmaticSeek flag wraps every ws.seekTo() call
+ *   we make so the 'seek' event handler doesn't bounce videoEl.currentTime.
+ *
+ * FIX (no sound): switched to MediaElement backend so WaveSurfer never
+ *   starts its own audio engine. ws.play() removed entirely — cursor is
+ *   driven solely by the RAF loop above.
  */
 
 const timeline = (() => {
 
-  let ws            = null;
-  let videoEl       = null;
-  let isReady       = false;
-  let userSeeking   = false;
-  let rafId         = null;
-  let freeCuts      = [];
-  let freeIdCounter = 1000;
+  let ws               = null;
+  let videoEl          = null;
+  let isReady          = false;
+  let programmaticSeek = false;
+  let userSeeking      = false;
+  let rafId            = null;
+  let freeCuts         = [];
+  let freeIdCounter    = 1000;
+
+  // ── Smooth cursor interpolation state ────────────────────────────────────
+  // On each timeupdate we record the video time + a wall-clock anchor.
+  // RAF interpolates forward from that anchor at the current playback rate
+  // so the cursor moves smoothly at 60fps between timeupdate ticks.
+  let anchorVideoTime  = 0;
+  let anchorWallTime   = 0;   // performance.now() at last timeupdate
+  let isPlaying        = false;
 
   // Region fill colors
   const COLORS = {
@@ -21,7 +43,6 @@ const timeline = (() => {
     mute        : 'rgba(100,100,  95, 0.18)',
     free_cut    : 'rgba(220, 50,  50, 0.12)',
   };
-  // Region top-border colors (thicker, more visible)
   const BORDER = {
     cut_silence : '#185FA5',
     cut_filler  : '#BA7517',
@@ -30,7 +51,6 @@ const timeline = (() => {
     mute        : '#646460',
     free_cut    : '#cc2222',
   };
-  // Short labels shown inside region
   const LABELS = {
     cut_silence : 'silence',
     cut_filler  : 'filler',
@@ -57,8 +77,9 @@ const timeline = (() => {
       barGap        : 1,
       barRadius     : 2,
       normalize     : true,
-      volume        : 0,        // muted — video el handles all audio
-      backend       : 'WebAudio',
+      volume        : 0,
+      backend       : 'MediaElement',
+      interact      : true,
       plugins: [
         WaveSurfer.regions.create({
           dragSelection: { slop: 5 },
@@ -70,61 +91,74 @@ const timeline = (() => {
 
     ws.on('ready', () => {
       isReady = true;
-      // FIX: call ws.play() so cursor animates, but volume stays 0
-      // so it stays in sync with video during playback
       refresh(state.operations);
       document.getElementById('tlDuration').textContent = formatTime(ws.getDuration());
     });
 
-    // User clicks/scrubs waveform → seek video
+    // Human click/scrub on waveform → seek video
     ws.on('seek', progress => {
-      if (!isReady || userSeeking) return;
-      videoEl.currentTime = progress * ws.getDuration();
+      if (!isReady) return;
+      if (programmaticSeek) return;
+      if (userSeeking) {
+        const t = progress * ws.getDuration();
+        videoEl.currentTime = t;
+        // Re-anchor immediately so RAF starts from the right position
+        anchorVideoTime = t;
+        anchorWallTime  = performance.now();
+      }
     });
 
-    // Attach mousedown to waveform wrapper AFTER ready (drawer exists then)
     ws.on('ready', () => {
       const wrapper = ws.drawer?.wrapper;
       if (wrapper) {
         wrapper.addEventListener('mousedown', () => {
           userSeeking = true;
-          // Brief lock — prevents timeupdate fighting the click seek
-          setTimeout(() => { userSeeking = false; }, 300);
+          setTimeout(() => { userSeeking = false; }, 400);
         });
       }
     });
 
-    // Video plays → advance WaveSurfer cursor (visual only)
+    // timeupdate: re-anchor interpolation. Does NOT move the cursor itself —
+    // that's RAF's job. This corrects for buffering stalls and speed changes.
     videoEl.addEventListener('timeupdate', () => {
       if (!isReady || userSeeking) return;
-      const dur = ws.getDuration();
-      if (dur > 0) ws.seekTo(Math.min(videoEl.currentTime / dur, 1));
-      document.getElementById('tlCurrent').textContent = formatTime(videoEl.currentTime);
+      anchorVideoTime = videoEl.currentTime;
+      anchorWallTime  = performance.now();
       highlightWordAt(videoEl.currentTime);
     });
 
     videoEl.addEventListener('play', () => {
-      // FIX: call ws.play() with volume 0 so cursor moves with playback
-      ws.setVolume(0);
-      ws.play(videoEl.currentTime);
+      isPlaying = true;
+      anchorVideoTime = videoEl.currentTime;
+      anchorWallTime  = performance.now();
       startRaf();
     });
-    videoEl.addEventListener('pause', () => { ws.pause(); stopRaf(); });
-    videoEl.addEventListener('ended', () => { ws.pause(); stopRaf(); });
+    videoEl.addEventListener('pause', () => {
+      isPlaying = false;
+      // Snap cursor to exact paused position
+      if (isReady) setCursorTo(videoEl.currentTime);
+      stopRaf();
+    });
+    videoEl.addEventListener('ended', () => {
+      isPlaying = false;
+      stopRaf();
+    });
+    // Seeking while paused: snap cursor immediately
+    videoEl.addEventListener('seeked', () => {
+      if (!isPlaying && isReady) setCursorTo(videoEl.currentTime);
+      anchorVideoTime = videoEl.currentTime;
+      anchorWallTime  = performance.now();
+    });
 
-    // FIX: region-created — only treat as free cut if id starts with 'free-'
-    // Op regions are added with explicit ids like 'op-N' so they won't match
+    // region-created: only treat as free cut if id doesn't start with 'op-'
     ws.on('region-created', region => {
       if (region.id && region.id.startsWith('op-')) return;
 
-      // Assign free-cut id immediately
       const id = freeIdCounter++;
       region.id = `free-${id}`;
       region.update({ color: COLORS.free_cut });
-
       styleRegionEl(region.element, 'free_cut', 'free cut');
 
-      // Right-click to delete
       if (region.element) {
         region.element.addEventListener('contextmenu', e => {
           e.preventDefault();
@@ -164,9 +198,49 @@ const timeline = (() => {
   }
 
 
+  // ── smooth cursor via RAF ──────────────────────────────────────────────────
+  // Interpolates forward from the last timeupdate anchor using wall-clock
+  // delta × playbackRate. Clamped to [0, duration] so it never overshoots.
+
+  function setCursorTo(videoTime) {
+    const dur = ws.getDuration();
+    if (dur > 0) {
+      programmaticSeek = true;
+      ws.seekTo(Math.min(Math.max(videoTime / dur, 0), 1));
+      programmaticSeek = false;
+    }
+    document.getElementById('tlCurrent').textContent = formatTime(videoTime);
+  }
+
+  function startRaf() {
+    updatePlayBtn();
+    if (rafId) cancelAnimationFrame(rafId);
+
+    const tick = () => {
+      if (!isPlaying) return;
+
+      // Interpolate: how far has wall-clock advanced since last timeupdate?
+      const wallDelta    = (performance.now() - anchorWallTime) / 1000;
+      const rate         = videoEl.playbackRate || 1;
+      const interpolated = anchorVideoTime + wallDelta * rate;
+      const dur          = ws.getDuration();
+      const clamped      = Math.min(interpolated, dur);
+
+      setCursorTo(clamped);
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+  }
+
+  function stopRaf() {
+    updatePlayBtn();
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  }
+
+
   // ── region styling helper ─────────────────────────────────────────────────
-  // FIX: centralised styling so op regions and free cuts look consistent
-  // Label only shown if element is wide enough to not overlap other text
 
   function styleRegionEl(el, type, labelText) {
     if (!el) return;
@@ -186,11 +260,7 @@ const timeline = (() => {
 
   function togglePlay() {
     if (!videoEl) return;
-    if (videoEl.paused) {
-      videoEl.play();
-    } else {
-      videoEl.pause();
-    }
+    videoEl.paused ? videoEl.play() : videoEl.pause();
     updatePlayBtn();
   }
 
@@ -202,15 +272,18 @@ const timeline = (() => {
   function seekTo(t) {
     if (!videoEl) return;
     videoEl.currentTime = t;
-    if (isReady) {
-      userSeeking = true;
-      ws.seekTo(Math.min(t / ws.getDuration(), 1));
-      setTimeout(() => { userSeeking = false; }, 300);
-    }
+    anchorVideoTime = t;
+    anchorWallTime  = performance.now();
+    if (isReady) setCursorTo(t);
   }
 
   function setSpeed(rate) {
-    if (videoEl) videoEl.playbackRate = rate;
+    if (videoEl) {
+      videoEl.playbackRate = rate;
+      // Re-anchor so interpolation uses the new rate from this moment
+      anchorVideoTime = videoEl.currentTime;
+      anchorWallTime  = performance.now();
+    }
   }
 
   function updatePlayBtn() {
@@ -221,29 +294,12 @@ const timeline = (() => {
       : `<path d="M5 3h3v13H5zM10 3h3v13h-3z" fill="currentColor"/>`;
   }
 
-  function startRaf() {
-    updatePlayBtn();
-    const tick = () => {
-      if (videoEl && !videoEl.paused) {
-        document.getElementById('tlCurrent').textContent = formatTime(videoEl.currentTime);
-        rafId = requestAnimationFrame(tick);
-      }
-    };
-    rafId = requestAnimationFrame(tick);
-  }
-
-  function stopRaf() {
-    updatePlayBtn();
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-  }
-
 
   // ── regions ────────────────────────────────────────────────────────────────
 
   function refresh(operations) {
     if (!isReady || !ws) return;
 
-    // Remove op regions only, keep free cuts
     Object.values(ws.regions.list).forEach(r => {
       if (r.id && r.id.startsWith('op-')) r.remove();
     });
@@ -252,7 +308,6 @@ const timeline = (() => {
       const op = operations[i];
       if (!op.enabled) continue;
 
-      // FIX: pass explicit id so region-created can identify it immediately
       const region = ws.addRegion({
         id    : `op-${op.id}`,
         start : op.start,

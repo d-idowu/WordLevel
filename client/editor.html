@@ -70,9 +70,24 @@
       <span class="topbar-sep">/</span>
       <span class="topbar-filename" id="topbarFilename">Loading...</span>
     </div>
-    <div class="topbar-right">
-      <div class="edit-stats" id="editStats"></div>
-      <button class="btn" onclick="undoAll()">Revert all</button>
+      <div class="topbar-right">
+        <div class="edit-stats" id="editStats"></div>
+        <button class="btn" id="undoBtn" onclick="undo()" title="Undo (Ctrl+Z)" disabled>
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <path d="M2 4v3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 7a5 5 0 109 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+          </svg>
+          Undo
+        </button>
+        <button class="btn" id="redoBtn" onclick="redo()" title="Redo (Ctrl+Shift+Z)" disabled>
+          Redo
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <path d="M12 4v3H9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 7a5 5 0 10-9 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+          </svg>
+        </button>
+        <button class="btn" onclick="undoAll()">Revert all</button>
+
       <button class="btn btn-secondary" onclick="autoClean()">
         <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l1.5 4H13l-3.5 2.5 1.5 4L7 9l-4 2.5 1.5-4L1 5h4.5z" fill="currentColor"/></svg>
         Auto-clean
